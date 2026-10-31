@@ -1,7 +1,7 @@
 services:
   ros-watch:
     build: .
-    image: ros-watch:0.3.1
+    image: ros-watch:0.3.2
     restart: unless-stopped
     init: true
     ports:

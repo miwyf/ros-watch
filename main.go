@@ -110,7 +110,7 @@ func resetCLI(config Config, args []string) error {
 	if !term.IsTerminal(fd) {
 		return errors.New("use an interactive terminal to reset the password")
 	}
-	fmt.Fprint(os.Stderr, "New password (15–128 characters): ")
+	fmt.Fprint(os.Stderr, "New password (8–128 characters): ")
 	password, err := term.ReadPassword(fd)
 	fmt.Fprintln(os.Stderr)
 	if err != nil {

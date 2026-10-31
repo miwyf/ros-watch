@@ -117,8 +117,8 @@ func (c *Control) initialized(ctx context.Context) (bool, error) {
 }
 
 func (c *Control) createAccount(ctx context.Context, username, password string) (bool, error) {
-	if !usernamePattern.MatchString(username) || !validPassword(password, 15) {
-		return false, errors.New("用户名须为 3–32 位字母、数字、点、下划线或短横线；密码须为 15–128 位")
+	if !usernamePattern.MatchString(username) || !validPassword(password, MinPasswordLength) {
+		return false, errors.New("用户名须为 3–32 位字母、数字、点、下划线或短横线；密码须为 8–128 位")
 	}
 	c.authMu.Lock()
 	defer c.authMu.Unlock()
@@ -155,8 +155,8 @@ func (c *Control) changeAccount(ctx context.Context, revision, current, username
 	if !usernamePattern.MatchString(username) {
 		return false, errors.New("用户名须为 3–32 位字母、数字、点、下划线或短横线")
 	}
-	if password != "" && !validPassword(password, 15) {
-		return false, errors.New("新密码须为 15–128 位，可以使用长密码或口令")
+	if password != "" && !validPassword(password, MinPasswordLength) {
+		return false, errors.New("新密码须为 8–128 位，可以使用长密码或口令")
 	}
 	c.authMu.Lock()
 	defer c.authMu.Unlock()
@@ -190,8 +190,8 @@ func (c *Control) changeAccount(ctx context.Context, revision, current, username
 }
 
 func (c *Control) resetPassword(ctx context.Context, username, password string) error {
-	if !validPassword(password, 15) {
-		return errors.New("新密码须为 15–128 位")
+	if !validPassword(password, MinPasswordLength) {
+		return errors.New("新密码须为 8–128 位")
 	}
 	c.authMu.Lock()
 	defer c.authMu.Unlock()

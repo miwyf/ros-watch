@@ -7,8 +7,8 @@
 <form method="post" action="/setup">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 <label for="username">用户名</label><input id="username" name="username" value="{{.Username}}" autocomplete="username" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{2,31}" minlength="3" maxlength="32" required autofocus aria-describedby="username-help"><small id="username-help" class="muted">3–32 位字母、数字、点、下划线或短横线。</small>
-<label for="password">密码</label><input id="password" name="password" type="password" autocomplete="new-password" minlength="15" maxlength="128" required placeholder="至少 15 位，可使用长口令" aria-describedby="password-help"><small id="password-help" class="muted">请保存好密码，登录后可在系统设置中修改。</small>
-<label for="confirm-password">确认密码</label><input id="confirm-password" name="confirm_password" type="password" autocomplete="new-password" minlength="15" maxlength="128" required placeholder="再次输入密码">
+<label for="password">密码</label><input id="password" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required placeholder="至少 8 位，可使用长口令" aria-describedby="password-help"><small id="password-help" class="muted">请保存好密码，登录后可在系统设置中修改。</small>
+<label for="confirm-password">确认密码</label><input id="confirm-password" name="confirm_password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required placeholder="再次输入密码">
 {{if .Error}}<p role="alert" class="error">{{.Error}}</p>{{end}}
 <button class="primary" type="submit">创建账号并进入看板 <span aria-hidden="true">→</span></button>
 </form><div class="login-footer"><span class="live-dot"></span> 仅首次使用时创建 <span>v{{.Version}}</span></div>

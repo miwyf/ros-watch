@@ -218,3 +218,38 @@ func TestConcurrentInitializersCreateOnlyOneAccount(t *testing.T) {
 		t.Fatal(count)
 	}
 }
+
+func TestEightCharacterPasswordAcrossAccountOperations(t *testing.T) {
+	a := freshApp(t)
+	b := browser(t, a)
+	token := b.setupForm(t)
+	if code, _ := b.submitSetup(t, "owner", "abcdefg", "abcdefg", token); code != 400 {
+		t.Fatal("seven-character setup password accepted", code)
+	}
+	if code, _ := b.submitSetup(t, "owner", "abcdefgh", "abcdefgh", token); code != 303 {
+		t.Fatal("eight-character setup password rejected", code)
+	}
+	if b.login(t, "owner", "abcdefgh") != 303 {
+		t.Fatal("eight-character login failed")
+	}
+	body := map[string]string{"username": "owner", "current_password": "abcdefgh", "new_password": "1234567", "confirm_password": "1234567"}
+	if code, _ := b.request(t, "POST", "/api/account", body, true); code != 400 {
+		t.Fatal("seven-character change accepted", code)
+	}
+	body["new_password"], body["confirm_password"] = "12345678", "12345678"
+	if code, _ := b.request(t, "POST", "/api/account", body, true); code != 200 {
+		t.Fatal("eight-character change rejected", code)
+	}
+	if b.login(t, "owner", "12345678") != 303 {
+		t.Fatal("changed eight-character password failed")
+	}
+	if err := a.control.resetPassword(context.Background(), "owner", "abcdefg"); err == nil {
+		t.Fatal("seven-character recovery accepted")
+	}
+	if err := a.control.resetPassword(context.Background(), "owner", "abcdefgh"); err != nil {
+		t.Fatal("eight-character recovery rejected", err)
+	}
+	if b.login(t, "owner", "abcdefgh") != 303 {
+		t.Fatal("recovered eight-character password failed")
+	}
+}

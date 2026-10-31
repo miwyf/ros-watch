@@ -320,8 +320,8 @@ func (a *App) setup(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case !usernamePattern.MatchString(username):
 			message, code = "用户名须为 3–32 位字母、数字、点、下划线或短横线", 400
-		case !validPassword(password, 15):
-			message, code = "密码须为 15–128 位，可以使用长密码或口令", 400
+		case !validPassword(password, MinPasswordLength):
+			message, code = "密码须为 8–128 位，可以使用长密码或口令", 400
 		case password != r.PostFormValue("confirm_password"):
 			message, code = "两次密码不一致", 400
 		case !a.reserveAttempt(r):
@@ -517,7 +517,7 @@ func (a *App) account(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	changed, err := a.control.changeAccount(ctx, account.Revision, body.Current, strings.TrimSpace(body.Username), body.New)
 	if err != nil {
-		if !usernamePattern.MatchString(strings.TrimSpace(body.Username)) || body.New != "" && !validPassword(body.New, 15) || body.New == "" && strings.TrimSpace(body.Username) == account.Username {
+		if !usernamePattern.MatchString(strings.TrimSpace(body.Username)) || body.New != "" && !validPassword(body.New, MinPasswordLength) || body.New == "" && strings.TrimSpace(body.Username) == account.Username {
 			apiError(w, 400, err.Error())
 		} else {
 			apiError(w, 503, "账号更新暂不可用")
