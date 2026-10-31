@@ -1192,7 +1192,8 @@ body.loading #refresh {
 }
 
 /* RouterOS instructions: read-only previews and manual copy */
-.routeros-help { margin-top: 22px; }
+.routeros-help { margin-top: 0; }
+.routeros-settings-link { padding: 0 4px; color: var(--accent); font-size: inherit; }
 .routeros-body { padding: 0 22px 22px; }
 .routeros-steps { padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.9; }
 .routeros-steps li { margin: 7px 0; }
@@ -1208,3 +1209,11 @@ body.loading #refresh {
 .routeros-details summary { cursor: pointer; font-size: 13px; color: #afbed0; }
 .routeros-copy-row { display: flex; justify-content: flex-end; margin: 12px 0; }
 @media (max-width: 760px) { .routeros-generator { grid-template-columns: 1fr; } .routeros-generator > button { margin-top: 0; justify-content: center; } .routeros-body { padding: 0 16px 18px; } }
+@media (max-width: 800px) {
+  .sidebar nav { min-width: 0; max-width: 100%; overflow-x: auto; }
+  .sidebar .nav-item { flex: 0 0 auto; white-space: nowrap; }
+}
+@media (max-width: 480px) {
+  .sidebar nav { gap: 2px; }
+  .sidebar .nav-item { font-size: 11px; padding: 8px 7px; }
+}

@@ -23,6 +23,7 @@ let view = "overview",
   loading = false,
   pending = false;
 const filterNames = ["hours", "wan", "scope", "proto", "outcome"];
+const viewNames = ["overview", "events", "system", "routeros", "settings"];
 function params(search = false) {
   const p = new URLSearchParams();
   for (const k of filterNames) if ($(k).value) p.set(k, $(k).value);
@@ -48,12 +49,17 @@ function fail(message) {
   $("connection-text").textContent = "刷新失败";
 }
 function showView(name) {
+  if (!viewNames.includes(name)) name = "overview";
   view = name;
+  const fragment = name === "overview" ? "" : "#" + name;
+  if (window.location.hash !== fragment)
+    window.history.replaceState(null, "", window.location.pathname + window.location.search + fragment);
   window.scrollTo({ top: 0, behavior: "instant" });
   const titles = {
     overview: "外部访问，一目了然",
     events: "访问记录",
     system: "接收状态",
+    routeros: "RouterOS 接入",
     settings: "系统设置",
   };
   $("page-title").replaceChildren(
@@ -61,10 +67,12 @@ function showView(name) {
     node("span", ".", "accent"),
   );
   document.querySelector(".subtitle").textContent =
-    name === "settings"
+    name === "routeros"
+      ? "生成和复制接入指令，在 ROS 终端手动执行。"
+      : name === "settings"
       ? "参数保存后生效，重建容器后依然保留。"
       : "从连接尝试中发现变化，掌握你的网络边界。";
-  for (const v of ["overview", "events", "system", "settings"])
+  for (const v of viewNames)
     $(v + "-view").classList.toggle("hidden", name !== v);
   document
     .querySelectorAll("[data-view]")
@@ -73,12 +81,15 @@ function showView(name) {
     overview: "访问概览",
     events: "访问记录",
     system: "接收状态",
+    routeros: "RouterOS 接入",
     settings: "系统设置",
   }[name];
   document
     .querySelector(".filterbar")
-    .classList.toggle("hidden", name === "settings");
-  $("refresh").classList.toggle("hidden", name === "settings");
+    .classList.toggle("hidden", name === "settings" || name === "routeros");
+  $("refresh").classList.toggle("hidden", name === "settings" || name === "routeros");
+  $("notice").classList.toggle("hidden", name === "routeros");
+  document.title = name === "routeros" ? "RouterOS 接入 · ROS Watch" : "ROS Watch · 网络观察台";
   if (name === "settings") window.loadSettings?.();
   if (name === "events") {
     cursor = null;
@@ -527,6 +538,11 @@ $("first-page").addEventListener("click", () => {
   cursor = null;
   refreshEvents().catch((e) => fail(e.message));
 });
+window.addEventListener("DOMContentLoaded", () => {
+  const initialView = window.location.hash.slice(1);
+  if (viewNames.includes(initialView)) showView(initialView);
+});
+window.addEventListener("hashchange", () => showView(window.location.hash.slice(1)));
 refresh();
 setInterval(() => {
   if (!document.hidden) refresh();
