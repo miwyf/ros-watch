@@ -11,7 +11,9 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/ros-watch . \
 
 FROM build AS test
 RUN go test -count=1 ./... && go vet ./...
-RUN apk add --no-cache gcc musl-dev && go test -race -count=1 ./...
+ARG ALPINE_MIRROR=https://dl-cdn.alpinelinux.org
+RUN sed -i "s|https://dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories \
+    && apk add --no-cache gcc musl-dev && go test -race -count=1 ./...
 
 FROM scratch AS artifacts
 COPY --from=build /out/probe /probe
