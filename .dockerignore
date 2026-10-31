@@ -6,3 +6,5 @@
 !cmd/**
 !web
 !web/**
+!geo
+!geo/**

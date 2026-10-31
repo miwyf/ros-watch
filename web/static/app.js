@@ -237,7 +237,24 @@ function rankPorts(rows) {
     box.append(b);
   }
 }
-function rankSources(rows) {
+const countryNames = typeof Intl.DisplayNames === "function"
+  ? new Intl.DisplayNames(["zh-CN"], {type:"region"}) : null;
+function locationNode(location) {
+  let text = location?.label || "未知地区";
+  if (location?.kind === "located") {
+    let country = location.country;
+    if (countryNames && /^[A-Z]{2}$/.test(location.country_code))
+      country = countryNames.of(location.country_code) || country;
+    const parts = [country, location.region, location.city]
+      .filter((value, index, all) => value && all.indexOf(value) === index);
+    text = parts.join(" · ") || text;
+    if (location.isp) text += " · " + location.isp;
+  }
+  const label = node("span", text, "ip-location");
+  label.title = "IP 出口归属地，仅供参考，不代表实际物理位置";
+  return label;
+}
+function rankSources(rows, locations = {}) {
   const box = $("source-rank");
   box.replaceChildren();
   if (!rows.length) {
@@ -251,7 +268,7 @@ function rankSources(rows) {
   for (const r of rows) {
     const tr = node("tr"),
       td = node("td");
-    td.append(ipButton(r.src));
+    td.append(ipButton(r.src), locationNode(locations[r.src]));
     tr.append(
       td,
       node("td", format(r.n)),
@@ -261,7 +278,7 @@ function rankSources(rows) {
     box.append(tr);
   }
 }
-function scans(rows) {
+function scans(rows, locations = {}) {
   const box = $("scan-list");
   if (!rows.length) {
     empty(box, "当前范围未识别到符合阈值的扫描行为");
@@ -273,6 +290,7 @@ function scans(rows) {
       info = node("div", undefined, "scan-info");
     info.append(
       ipButton(r.src),
+      locationNode(locations[r.src]),
       node("p", `峰值窗口涉及 ${r.ports} 个端口 · 最后 ${clock(r.last)}`),
     );
     wrap.append(
@@ -393,6 +411,7 @@ async function refreshEvents() {
     source.append(
       node("span", r.src, "ip-button"),
       node("span", r.sport !== null ? " : " + r.sport : "", "muted"),
+      locationNode(r.src_location),
     );
     const scope = r.scope === "router" ? "路由器自身" : "内网映射";
     const badge = node("td");
@@ -450,8 +469,8 @@ async function refresh() {
       r.scans.length >= 20 ? "20+" : format(r.scans.length);
     trend(r.trend);
     rankPorts(r.ports);
-    rankSources(r.sources);
-    scans(r.scans);
+    rankSources(r.sources, r.locations);
+    scans(r.scans, r.locations);
     status(r.status, r.coverage);
     for (const w of r.wans)
       if (![...$("wan").options].some((o) => o.value === w.wan))

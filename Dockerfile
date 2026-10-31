@@ -5,6 +5,7 @@ RUN go mod download
 COPY *.go ./
 COPY web ./web
 COPY cmd ./cmd
+COPY geo ./geo
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/ros-watch . \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/probe ./cmd/probe \
     && mkdir -p /out/data && chown 10001:10001 /out/data
@@ -21,6 +22,7 @@ COPY --from=build /out/probe /probe
 FROM scratch AS production
 ENV DATA_DIR=/data GOMEMLIMIT=128MiB
 COPY --from=build /out/ros-watch /ros-watch
+COPY --from=build /src/geo /geo
 COPY --from=build --chown=10001:10001 /out/data /data
 USER 10001:10001
 VOLUME ["/data"]

@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	github.com/gorilla/securecookie v1.1.2
+	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20260901011515-c1a1fc7d5941
 	golang.org/x/crypto v0.58.0
 	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.49.0

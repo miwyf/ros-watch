@@ -533,6 +533,16 @@ tbody tr:hover {
 .ip-button:hover {
   color: var(--accent);
 }
+.ip-location {
+  display: block;
+  max-width: 30ch;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .scan-list {
   padding: 0 22px 18px;
 }

@@ -10,6 +10,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"log"
 	"math"
 	"mime"
 	"net"
@@ -54,6 +55,7 @@ type App struct {
 	control       *Control
 	store         *Store
 	collector     *Collector
+	geo           *GeoLookup
 	templates     *template.Template
 	cookies       *securecookie.SecureCookie
 	authMu        sync.Mutex
@@ -109,10 +111,15 @@ func newApp(config Config) (*App, error) {
 		return nil, errors.New("session key unavailable or invalid")
 	}
 	a.cookies = securecookie.New(key, nil).MaxAge(43200).MaxLength(2048).SetSerializer(securecookie.JSONEncoder{})
+	a.geo, err = newGeoLookup("geo")
+	if err != nil {
+		log.Print("IP location database unavailable; collection remains active")
+	}
 	return a, nil
 }
 
 func (a *App) close() {
+	a.geo.close()
 	if a.store != nil {
 		a.store.close()
 	}
@@ -696,6 +703,8 @@ func (a *App) summary(w http.ResponseWriter, r *http.Request) {
 	}
 	response["status"] = a.collector.status()
 	response["generated_at"] = unixNow()
+	response["locations"] = a.locations(data["sources"].([]map[string]any), data["scans"].([]map[string]any))
+	response["geo"] = map[string]any{"available": a.geo != nil, "source": "ip2region", "version": geoDataVersion}
 	jsonResponse(w, 200, response)
 }
 
@@ -732,7 +741,15 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 		next = rows[49].ID
 		rows = rows[:50]
 	}
-	jsonResponse(w, 200, map[string]any{"rows": rows, "next": next})
+	type locatedEvent struct {
+		Event
+		Location IPLocation `json:"src_location"`
+	}
+	views := make([]locatedEvent, 0, len(rows))
+	for _, row := range rows {
+		views = append(views, locatedEvent{row, a.geo.location(row.Src)})
+	}
+	jsonResponse(w, 200, map[string]any{"rows": views, "next": next})
 }
 
 func (a *App) export(w http.ResponseWriter, r *http.Request) {
@@ -759,9 +776,10 @@ func (a *App) export(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", "attachment; filename=ros-watch.csv")
 	_, _ = io.WriteString(w, "\ufeff")
 	csvWriter := csv.NewWriter(w)
-	_ = csvWriter.Write([]string{"ts", "src", "sport", "dst", "dport", "proto", "wan", "scope", "outcome"})
+	_ = csvWriter.Write([]string{"ts", "src", "sport", "dst", "dport", "proto", "wan", "scope", "outcome", "src_location", "src_isp"})
 	for _, e := range rows {
-		record := []string{strconv.FormatFloat(e.TS, 'f', 6, 64), e.Src, portText(e.Sport), e.Dst, portText(e.Dport), e.Proto, e.WAN, e.Scope, e.Outcome}
+		location := a.geo.location(e.Src)
+		record := []string{strconv.FormatFloat(e.TS, 'f', 6, 64), e.Src, portText(e.Sport), e.Dst, portText(e.Dport), e.Proto, e.WAN, e.Scope, e.Outcome, location.Label, location.ISP}
 		for i, value := range record {
 			if len(value) > 0 && strings.ContainsRune("=+-@", rune(value[0])) {
 				record[i] = "'" + value
