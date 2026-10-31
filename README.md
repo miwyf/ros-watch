@@ -2,7 +2,7 @@
 
 单容器 RouterOS 外部访问观察台：来源 / 目标端口排行、访问趋势、疑似扫描、IP 归属地、明细筛选与 CSV 导出。界面适配电脑和手机，静态资源全部本地提供。
 
-版本 **0.4.0**。Go、内嵌网页资源和 SQLite，单个原生程序，无独立数据库或采集器。
+版本 **0.4.1**。Go、内嵌网页资源和 SQLite，单个原生程序，无独立数据库或采集器。
 
 ## Docker / 1Panel 部署
 
@@ -26,7 +26,7 @@ docker compose up -d --build
 
 数据库仅存储 Argon2id 密码哈希（独立随机盐，19 MiB / 2 次迭代 / 1 并行度），不保存可取回的明文密码。账号和设置在 `/data/control.sqlite3`，日志在 `/data/events.sqlite3`，会话密钥在 `/data/session.key`，全部位于持久命名卷。改变环境变量不会覆盖后台已保存的账号或参数。
 
-1Panel：在“容器 → 编排”使用本项目 `compose.yaml`，保留 Dockerfile、go.mod、go.sum、根目录 Go 源码、cmd/、web/ 和 geo/。镜像 `ros-watch:0.4.0` 为本地构建，未发布公共仓库。也可直接用 Compose 部署后在 1Panel 容器页管理。
+1Panel：在“容器 → 编排”使用本项目 `compose.yaml`，保留 Dockerfile、go.mod、go.sum、根目录 Go 源码、cmd/、web/ 和 geo/。镜像 `ros-watch:0.4.1` 为本地构建，未发布公共仓库。也可直接用 Compose 部署后在 1Panel 容器页管理。
 
 容器以非 root 运行，只读根文件系统，仅 `/data` 可写，默认限制 192 MiB 内存 / 0.5 CPU。不要执行 `docker compose down -v`，它会删除账号、设置和日志所在的数据卷。
 
@@ -67,6 +67,10 @@ docker compose exec ros-watch /ros-watch reset-password
 命令通过隐藏输入读取新密码，不接受命令行密码参数。需要同时恢复用户名时追加 `--username 新用户名`。恢复会让所有旧网页登录失效，不删除日志。
 
 ## 接入 RouterOS
+
+网页「系统设置 → RouterOS 接入指令」提供脚本生成和复制。填写 ROS 可访问的日志服务器 IPv4 地址与 Docker 对外映射的 UDP 端口（默认 5514），生成后在 WinBox 的 New Terminal 中手动执行。网页地址为非回环 IPv4 时预填该地址；使用域名或反向代理时需要手动确认日志服务器地址。这里的输入仅用于生成指令，不更改看板监听地址或采集设置。
+
+接入、检查、撤销指令分开显示和复制。已接入的路由器无需重复执行；模板会阻止重复添加 ROSWatch。需先在后台保存日志来源白名单，并核对 ROS 的 WAN 接口列表和现有防火墙规则。网页不会自动连接路由器，也不需要提供 ROS 登录凭据。
 
 将 ROS 防火墙 syslog 发到服务器 UDP 5514。记录应包含 `input:` / `forward:`、入站接口、协议和 `来源->目标`；普通系统日志不能生成访问统计。
 

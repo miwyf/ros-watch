@@ -1190,3 +1190,21 @@ body.loading #refresh {
     padding: 8px 10px;
   }
 }
+
+/* RouterOS instructions: read-only previews and manual copy */
+.routeros-help { margin-top: 22px; }
+.routeros-body { padding: 0 22px 22px; }
+.routeros-steps { padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.9; }
+.routeros-steps li { margin: 7px 0; }
+.routeros-generator { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, .45fr) auto; gap: 16px; align-items: start; margin: 20px 0 12px; }
+.routeros-generator label { display: flex; flex-direction: column; gap: 7px; min-width: 0; font-size: 12px; color: #afbed0; }
+.routeros-generator input { width: 100%; min-width: 0; }
+.routeros-generator small { color: var(--muted); font-size: 11px; line-height: 1.6; }
+.routeros-generator > button { margin-top: 24px; }
+.routeros-code-heading { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin: 20px 0 12px; }
+.routeros-code-heading h3 { font-size: 14px; font-weight: 500; }
+.routeros-code { display: block; width: 100%; min-width: 0; resize: vertical; border: 1px solid var(--border); border-radius: 8px; background: #0f1620; color: var(--text); padding: 12px; font: 12px/1.8 ui-monospace, Consolas, monospace; white-space: pre; overflow: auto; }
+.routeros-details { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 20px; }
+.routeros-details summary { cursor: pointer; font-size: 13px; color: #afbed0; }
+.routeros-copy-row { display: flex; justify-content: flex-end; margin: 12px 0; }
+@media (max-width: 760px) { .routeros-generator { grid-template-columns: 1fr; } .routeros-generator > button { margin-top: 0; justify-content: center; } .routeros-body { padding: 0 16px 18px; } }
