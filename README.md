@@ -2,7 +2,7 @@
 
 单容器 RouterOS 外部访问观察台：来源 / 目标端口排行、访问趋势、疑似扫描、明细筛选与 CSV 导出。界面适配电脑和手机，静态资源全部本地提供。
 
-版本 **0.2.0**。Python 3.13、Flask + Waitress、SQLite，一个进程，无独立数据库或采集器。
+版本 **0.3.0**。Go、内嵌网页资源和 SQLite，单个原生程序，无独立数据库或采集器。
 
 ## Docker / 1Panel 部署
 
@@ -17,7 +17,7 @@ docker compose up -d --build
 首次启动自动创建用户名 `admin` 和随机密码。初始凭据仅保存在数据卷的 `/data/initial-admin.txt`，不会打印到容器日志，可在服务器本地查看：
 
 ```sh
-docker compose exec ros-watch cat /data/initial-admin.txt
+docker compose exec ros-watch /ros-watch initial-account
 ```
 
 访问 `http://<服务器内网地址>:8086` 登录，进入 **系统设置**：
@@ -28,7 +28,7 @@ docker compose exec ros-watch cat /data/initial-admin.txt
 
 数据库仅存储 Argon2id 密码哈希（独立随机盐，19 MiB / 2 次迭代 / 1 并行度），不保存可取回的明文密码。账号和设置在 `/data/control.sqlite3`，日志在 `/data/events.sqlite3`，会话密钥在 `/data/session.key`，全部位于持久命名卷。改变环境变量不会覆盖后台已保存的账号或参数。
 
-1Panel：在“容器 → 编排”使用本项目 `compose.yaml`，保留 Dockerfile、requirements.txt、roswatch/。镜像 `ros-watch:0.2.0` 为本地构建，未发布公共仓库。也可直接用 Compose 部署后在 1Panel 容器页管理。
+1Panel：在“容器 → 编排”使用本项目 `compose.yaml`，保留 Dockerfile、go.mod、go.sum、根目录 Go 源码、cmd/ 和 web/。镜像 `ros-watch:0.3.0` 为本地构建，未发布公共仓库。也可直接用 Compose 部署后在 1Panel 容器页管理。
 
 容器以非 root 运行，只读根文件系统，仅 `/data` 可写，默认限制 192 MiB 内存 / 0.5 CPU。不要执行 `docker compose down -v`，它会删除账号、设置和日志所在的数据卷。
 
@@ -52,25 +52,18 @@ docker compose exec ros-watch cat /data/initial-admin.txt
 
 默认部署没有业务环境变量。只有部署层面的 `DATA_DIR`、`HTTP_HOST/PORT`、`SYSLOG_HOST/PORT`、`COOKIE_SECURE`、`DEMO_MODE` 可在需要时通过 Compose 覆盖。它们不包含真实宿主机 IP 或登录凭据。HTTPS 由反向代理提供时，确认已通过 HTTPS 访问后再设置 `COOKIE_SECURE=true`；HTTP 保持 false。
 
-## 从 0.1.0 升级
+## 更新已有部署
 
-旧版账号只有密码，业务参数在容器环境中。**先迁移再更换容器**，保留同一命名卷和 Compose 项目名。一次性管理命令可从标准输入读取旧版有效环境值（JSON 对象）：
+保留同一命名卷和 Compose 项目名。Go 程序直接读取已有 SQLite 账号、设置和日志，以及标准 Argon2id 密码哈希。更新前备份数据和部署文件，再用新镜像重建容器；账号和后台参数不变，浏览器需要重新登录。
 
-```sh
-# 在挂载同一数据卷的新版本临时容器内调用；通过 stdin 输入旧配置，勿把密码放在参数里。
-python -m roswatch.manage import-v01 --stdin
-```
-
-迁移将旧密码初始化为 `admin` 的密码，并导入白名单、WAN 映射、保留和限速设置。已存在账号时不会覆盖账号或重置密码。实际升级应先备份旧镜像、Compose、私人配置和数据库；将旧容器有效环境值在服务器内通过管道传给新版本，避免将凭据输出到终端或报告。
-
-迁移成功后使用新 Compose 重建服务，移走活动 `.env` 中旧的业务和密码项。原有日志库不变；新建的 `control.sqlite3` 也须纳入备份。私人旧配置只作为受保护的回退资料保留，不加入源码或共享报告。
+生产镜像基于空镜像，仅包含 Go 可执行文件和数据目录，不包含解释器、Shell、包管理器、构建工具或旧后端。旧镜像仅可作为独立的运维回退备份保管。
 
 ## 忘记密码
 
 在服务器的项目目录执行交互式恢复：
 
 ```sh
-docker compose exec ros-watch python -m roswatch.manage reset-password
+docker compose exec ros-watch /ros-watch reset-password
 ```
 
 命令通过隐藏输入读取新密码，不接受命令行密码参数。需要同时恢复用户名时追加 `--username 新用户名`。恢复会让所有旧网页登录失效，不删除日志。
@@ -104,20 +97,22 @@ docker compose exec ros-watch python -m roswatch.manage reset-password
 
 ## 开发验证
 
-Python 3.13+；安装 `requirements-dev.txt` 后执行：
+Go 1.27+：
 
 ```sh
-python -m pytest -q -p no:cacheprovider
+go test -count=1 ./...
+go vet ./...
+go build -o ros-watch .
 docker build --target test -t ros-watch-tests .
 ```
 
-测试依赖不进入生产镜像。使用项目外的临时数据目录运行 `python -m roswatch`；首次凭据保存在该目录。设置 `DEMO_MODE=true` 和 `HTTP_HOST=127.0.0.1` 可生成文档地址演示数据（必须绑定回环），不要把演示库接入生产。
+Docker 测试阶段还运行竞争检测；测试工具不进入生产镜像。使用项目外的临时数据目录运行 `ros-watch`；首次凭据保存在该目录。设置 `DEMO_MODE=true` 和 `HTTP_HOST=127.0.0.1` 可生成文档地址演示数据（必须绑定回环），不要把演示库接入生产。
 
-`tools/send_sample.py` / `tools/load_probe.py` 仅供有限模拟验证，不要向生产数据库发送模拟流量。工具临时认证参数与服务的持久账号配置相互独立。
+`go run ./cmd/probe` 提供 1–60 秒的有限合成 UDP/HTTP 验证，仅用于隔离测试实例。该工具会把测试实例的日志白名单改为回环地址，不可对生产服务运行。Linux 下可采样进程 RSS 和单核 CPU 使用率；CPU 采样按 Linux USER_HZ=100 换算。
 
 ## 官方资料
 
 - [RouterOS 日志](https://manual.mikrotik.com/docs/diagnostics-monitoring-and-troubleshooting/log/)
-- [Flask 使用 Waitress 部署](https://flask.palletsprojects.com/en/stable/deploying/waitress/)
+- [Go net/http](https://pkg.go.dev/net/http)
 - [OWASP 密码存储](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
 - [Docker 环境变量与 Secrets](https://docs.docker.com/compose/how-tos/environment-variables/best-practices/)
