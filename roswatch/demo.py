@@ -21,13 +21,16 @@ def seed(store):
         message = f"<134>Oct 31 12:00:00 demo {prefix} {scope}: in:{interface} out:(none), proto {proto}, {src}:{40000 + i}->192.0.2.1:{port}, len 60"
         events.append(
             parse_message(
-                message, "127.0.0.1", store.config.wan_map, now - rng.random() * 86400
+                message,
+                "127.0.0.1",
+                store.config.settings.wan_map,
+                now - rng.random() * 86400,
             )
         )
     for i in range(32):
         message = f"RW-DROP input: in:pppoe-out1 out:(none), proto TCP (SYN), 203.0.113.45:{50000 + i}->192.0.2.1:{1000 + i}, len 60"
         events.append(
-            parse_message(message, "127.0.0.1", store.config.wan_map, now - 60)
+            parse_message(message, "127.0.0.1", store.config.settings.wan_map, now - 60)
         )
     events.sort(key=lambda e: e["ts"])
     store.append(events)

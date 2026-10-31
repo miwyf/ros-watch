@@ -1,23 +1,12 @@
 services:
   ros-watch:
     build: .
-    image: ros-watch:0.1.0
+    image: ros-watch:0.2.0
     restart: unless-stopped
     init: true
     ports:
-      - "${BIND_IP:-127.0.0.1}:${WEB_PORT:-8086}:8080"
-      - "${BIND_IP:-127.0.0.1}:${SYSLOG_PORT:-5514}:5514/udp"
-    environment:
-      APP_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD in .env (at least 12 characters)}
-      ALLOWED_SENDERS: ${ALLOWED_SENDERS:?Set the router LAN IP in .env}
-      WAN_MAP: ${WAN_MAP:-}
-      RETENTION_DAYS: ${RETENTION_DAYS:-7}
-      MAX_DB_MB: ${MAX_DB_MB:-512}
-      MAX_ROWS: ${MAX_ROWS:-500000}
-      MIN_FREE_MB: ${MIN_FREE_MB:-256}
-      INGEST_PER_SECOND: ${INGEST_PER_SECOND:-500}
-      SAMPLING_MODE: ${SAMPLING_MODE:-limited}
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      - "8086:8080"
+      - "5514:5514/udp"
     volumes:
       - ros-watch-data:/data
     read_only: true

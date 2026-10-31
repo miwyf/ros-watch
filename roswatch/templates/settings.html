@@ -1,0 +1,175 @@
+<section id="settings-view" class="view hidden">
+  <div class="settings-grid">
+    <form id="runtime-form" class="panel settings-form">
+      <div class="panel-heading">
+        <div>
+          <h2>日志与观察规则</h2>
+          <p>只调整看板，不修改路由器的放行或拦截策略。</p>
+        </div>
+        <span class="tag">即时生效</span>
+      </div>
+      <div class="settings-fields">
+        <label class="full-field"
+          >允许发送日志的设备<textarea
+            id="set-allowed_senders"
+            rows="3"
+            maxlength="4096"
+            placeholder="填写路由器的内网 IP 或网段，每行一个"
+          ></textarea
+          ><small
+            >留空时暂停接收。填写发送日志的设备地址，而非外部访问者地址。</small
+          ></label
+        >
+        <label class="full-field"
+          >WAN 接口显示名称<textarea
+            id="set-wan_map"
+            rows="3"
+            placeholder="接口名称=显示名称，例如 pppoe-out1=WAN1"
+          ></textarea
+          ><small>每行一组。名称变更只影响之后收到的记录。</small></label
+        >
+        <label
+          >保留期限（天）<input
+            id="set-retention_days"
+            type="number"
+            min="1"
+            max="31"
+            required
+        /></label>
+        <label
+          >最多保留记录数<input
+            id="set-max_rows"
+            type="number"
+            min="1"
+            max="2000000"
+            required
+        /></label>
+        <label
+          >日志数据库预算（MB）<input
+            id="set-max_db_mb"
+            type="number"
+            min="8"
+            max="8192"
+            required
+        /></label>
+        <label
+          >最低可用磁盘空间（MB）<input
+            id="set-min_free_mb"
+            type="number"
+            min="0"
+            max="1048576"
+            required
+        /></label>
+        <p class="field-note full-field">
+          降低保留期限、记录数或容量预算后，后台会清理旧记录。预算不等于整个数据卷的硬配额。
+        </p>
+        <label
+          >接收处理上限（条/秒）<input
+            id="set-ingest_per_second"
+            type="number"
+            min="1"
+            max="5000"
+            required
+        /></label>
+        <label
+          >等待队列容量（条）<input
+            id="set-queue_size"
+            type="number"
+            min="1"
+            max="8192"
+            required
+        /></label>
+        <label
+          >扫描窗口（秒）<input
+            id="set-scan_window"
+            type="number"
+            min="60"
+            max="3600"
+            required
+        /></label>
+        <label
+          >疑似扫描的不同端口数<input
+            id="set-scan_ports"
+            type="number"
+            min="2"
+            max="1000"
+            required
+        /></label>
+        <label class="full-field"
+          >ROS 端日志采样情况<select id="set-sampling">
+            <option value="unknown">尚未确认是否限速</option>
+            <option value="limited">ROS 端已限速，按采样结果展示</option>
+            <option value="full">已确认 ROS 端未限速</option></select
+          ><small
+            >这里只标明统计口径，不会调整 ROS 配置；UDP 传输仍可能丢包。</small
+          ></label
+        >
+      </div>
+      <div class="settings-actions">
+        <button class="primary" type="submit">保存日志设置</button
+        ><span id="runtime-result" role="status"></span>
+      </div>
+    </form>
+    <div>
+      <form id="account-form" class="panel settings-form">
+        <div class="panel-heading">
+          <div>
+            <h2>账号安全</h2>
+            <p>修改后，所有设备都需要重新登录。</p>
+          </div>
+        </div>
+        <div class="settings-fields single-column">
+          <label
+            >用户名<input
+              id="account-username"
+              autocomplete="username"
+              pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{2,31}"
+              minlength="3"
+              maxlength="32"
+              required
+            /><small>3–32 位字母、数字、点、下划线或短横线。</small></label
+          >
+          <label
+            >当前密码<input
+              id="account-current"
+              type="password"
+              autocomplete="current-password"
+              maxlength="128"
+              required
+          /></label>
+          <label
+            >新密码<input
+              id="account-new"
+              type="password"
+              autocomplete="new-password"
+              minlength="15"
+              maxlength="128"
+              placeholder="只修改用户名时可留空"
+            /><small>15–128 位，可使用便于记忆的长口令。</small></label
+          >
+          <label
+            >确认新密码<input
+              id="account-confirm"
+              type="password"
+              autocomplete="new-password"
+              maxlength="128"
+          /></label>
+        </div>
+        <div class="settings-actions">
+          <button class="primary" type="submit">更新账号</button
+          ><span id="account-result" role="status"></span>
+        </div>
+      </form>
+      <article class="panel settings-help">
+        <h2>账号与设置保留在哪里？</h2>
+        <p>
+          账号、密码哈希和采集设置保存在持久数据卷中。后台修改后无需再改环境变量。
+        </p>
+        <p>
+          密码不会以明文存入数据库。忘记密码时，可通过服务器本地的恢复命令重设。
+        </p>
+        <p>访问端口由 Docker Compose 管理；本机地址无需在后台重复填写。</p>
+      </article>
+    </div>
+  </div>
+</section>

@@ -1,3 +1,4 @@
+from dataclasses import replace
 import time
 
 from conftest import event
@@ -39,7 +40,7 @@ def test_filters_paging_and_icmp(store):
 
 
 def test_retention_and_row_cap(store):
-    store.config.max_rows = 10
+    store.config.settings = replace(store.config.settings, max_rows=10)
     store.append(
         [event(ts=time.time() - 8 * 86400)] + [event(port=i) for i in range(20)]
     )
@@ -51,8 +52,8 @@ def test_retention_and_row_cap(store):
 
 
 def test_budget_prunes_and_continues(store):
-    store.config.max_db_mb = 8
-    store.config.max_rows = 50000
+    store.config.settings = replace(store.config.settings, max_db_mb=8)
+    store.config.settings = replace(store.config.settings, max_rows=50000)
     for _ in range(4):
         rows = [event(port=i) for i in range(1000)]
         for e in rows:
@@ -60,7 +61,7 @@ def test_budget_prunes_and_continues(store):
         store.append(rows)
         store.maintenance(True)
     # A later cleanup under a smaller row cap must reclaim without losing writer.
-    store.config.max_rows = 100
+    store.config.settings = replace(store.config.settings, max_rows=100)
     store.maintenance(True)
     store.append([event(port=65535)])
     assert store.query(filters(), 1)[0]["dport"] == 65535

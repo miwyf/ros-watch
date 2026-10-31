@@ -1,110 +1,123 @@
 # ROS Watch
 
-单容器 RouterOS 外部访问观察台。接收防火墙 syslog，自动整理来源排行、目标端口排行、时间趋势和疑似扫描；支持来源 IP / 端口 / WAN / 协议 / 访问对象筛选、原始记录展开和 CSV 导出。界面适配电脑与手机，无 CDN、外部字体或第三方统计请求。
+单容器 RouterOS 外部访问观察台：来源 / 目标端口排行、访问趋势、疑似扫描、明细筛选与 CSV 导出。界面适配电脑和手机，静态资源全部本地提供。
 
-版本：**0.1.0**。Python 3.13、Flask + Waitress、SQLite；一个服务进程，无独立数据库、采集器或前端构建服务。
+版本 **0.2.0**。Python 3.13、Flask + Waitress、SQLite，一个进程，无独立数据库或采集器。
 
 ## Docker / 1Panel 部署
 
-将项目完整放到新 Debian 上，例如 `/opt/ros-watch`。首次在该目录运行：
-
-```sh
-cp .env.example .env
-```
-
-编辑 `.env`，至少填写：
-
-- `BIND_IP`：Debian 的内网地址。默认 `127.0.0.1` 只能本机访问，ROS 无法远程发送。
-- `APP_PASSWORD`：随机生成、至少 12 位的看板密码。与路由器密码无关。
-- `ALLOWED_SENDERS`：**实际发送 syslog 的 ROS 内网地址**，建议精确到单个 IP；逗号分隔可添加多个 IP/CIDR。禁止填写外部访问者的 IP，也不要直接允许所有来源。
-- `WAN_MAP`：RouterOS 的入站接口与显示名称，例如 `{"pppoe-out1":"WAN1","pppoe-out2":"WAN2"}`。
-
-启动：
+在项目目录直接运行：
 
 ```sh
 docker compose up -d --build
 ```
 
-浏览器访问 `http://<Debian内网地址>:8086`，使用 `.env` 中的密码登录。ROS 发送到 `<Debian内网地址>:5514/UDP`。
+**无需填写 .env、本机 IP、长期密码或采集参数。** 默认发布网页 TCP 8086、syslog UDP 5514；需要改端口时修改 `compose.yaml` 的 `ports`。容器监听自己的所有接口，由 Docker 负责宿主机映射。将其部署在可信内网，宿主机防火墙应限制日志来源；无需为日志端口新增 WAN 映射。
 
-1Panel：在“容器 → 编排”中使用此项目的 `compose.yaml`，项目目录同时保留 Dockerfile、requirements.txt、roswatch/ 和 `.env`。这是本地构建镜像 `ros-watch:0.1.0`，**不是已发布的公共镜像**。
+首次启动自动创建用户名 `admin` 和随机密码。初始凭据仅保存在数据卷的 `/data/initial-admin.txt`，不会打印到容器日志，可在服务器本地查看：
 
-容器仅以非 root 运行，根文件系统只读，仅命名卷 `/data` 可写；默认限制 192 MiB 内存、0.5 CPU。命名卷保存数据库与会话密钥，更新容器不会清空。不要运行 `docker compose down -v`，该选项会删除卷。
+```sh
+docker compose exec ros-watch cat /data/initial-admin.txt
+```
 
-需要 HTTPS 时，在 1Panel 配置反向代理到网页端口并将 `COOKIE_SECURE=true`；直接使用 HTTP 时保持 false。UDP 日志端口仅供内网 ROS 访问，宿主机防火墙应限制来源；它不需要 WAN 端口映射。源地址白名单是接收范围限制，不是加密认证，适用于可信内网。
+访问 `http://<服务器内网地址>:8086` 登录，进入 **系统设置**：
+
+1. 在“账号安全”修改用户名或密码。修改时必须验证当前密码，修改后所有旧登录失效；首次修改成功后初始凭据文件自动移除。
+2. 在“日志与观察规则”填写允许发送日志的路由器地址和 WAN 接口映射。
+3. 设置保留期限、容量预算、队列、接收限速、扫描阈值及 ROS 采样情况，保存后生效。白名单未配置时拒绝所有来源，不开放匿名初始化。
+
+数据库仅存储 Argon2id 密码哈希（独立随机盐，19 MiB / 2 次迭代 / 1 并行度），不保存可取回的明文密码。账号和设置在 `/data/control.sqlite3`，日志在 `/data/events.sqlite3`，会话密钥在 `/data/session.key`，全部位于持久命名卷。改变环境变量不会覆盖后台已保存的账号或参数。
+
+1Panel：在“容器 → 编排”使用本项目 `compose.yaml`，保留 Dockerfile、requirements.txt、roswatch/。镜像 `ros-watch:0.2.0` 为本地构建，未发布公共仓库。也可直接用 Compose 部署后在 1Panel 容器页管理。
+
+容器以非 root 运行，只读根文件系统，仅 `/data` 可写，默认限制 192 MiB 内存 / 0.5 CPU。不要执行 `docker compose down -v`，它会删除账号、设置和日志所在的数据卷。
+
+## 后台可修改的参数
+
+| 项目           |                           默认值 | 范围 / 说明                                    |
+| -------------- | -------------------------------: | ---------------------------------------------- |
+| 日志来源白名单 |                               空 | 支持 IP/CIDR，空表示暂停接收，禁止全部地址网段 |
+| WAN 映射       | pppoe-out1=WAN1、pppoe-out2=WAN2 | 名称调整只影响后续记录                         |
+| 最长保留       |                             7 天 | 1–31 天                                        |
+| 保留行数       |                           500000 | 1–2000000，每约 30 秒清理，可能短暂超出        |
+| 主库预算       |                           512 MB | 8–8192 MB，80% 使用量触发清理旧数据            |
+| 最低可用空间   |                           256 MB | 空间不足时暂停写入，界面显示丢弃               |
+| 接收处理上限   |                        500 条/秒 | 1–5000，超出计入处理限速丢弃                   |
+| 等待队列       |                          4096 条 | 1–8192，调整容量时保留已排队记录               |
+| 扫描端口阈值   |                               15 | 2–1000 个不同端口                              |
+| 扫描窗口       |                           300 秒 | 60–3600 秒，固定窗口                           |
+| ROS 端采样情况 |                           未确认 | 只标记统计口径，不修改 ROS                     |
+
+降低期限、行数或预算会清理旧记录。主库预算不等于整个卷的硬配额：WAL/SHM、账号库和文件系统也占空间；删除后数据页可复用，文件不一定立即缩小。容器自身日志已独立轮转（5 MiB × 2）。Debian / ESXi 数据存储仍需预留空间。
+
+默认部署没有业务环境变量。只有部署层面的 `DATA_DIR`、`HTTP_HOST/PORT`、`SYSLOG_HOST/PORT`、`COOKIE_SECURE`、`DEMO_MODE` 可在需要时通过 Compose 覆盖。它们不包含真实宿主机 IP 或登录凭据。HTTPS 由反向代理提供时，确认已通过 HTTPS 访问后再设置 `COOKIE_SECURE=true`；HTTP 保持 false。
+
+## 从 0.1.0 升级
+
+旧版账号只有密码，业务参数在容器环境中。**先迁移再更换容器**，保留同一命名卷和 Compose 项目名。一次性管理命令可从标准输入读取旧版有效环境值（JSON 对象）：
+
+```sh
+# 在挂载同一数据卷的新版本临时容器内调用；通过 stdin 输入旧配置，勿把密码放在参数里。
+python -m roswatch.manage import-v01 --stdin
+```
+
+迁移将旧密码初始化为 `admin` 的密码，并导入白名单、WAN 映射、保留和限速设置。已存在账号时不会覆盖账号或重置密码。实际升级应先备份旧镜像、Compose、私人配置和数据库；将旧容器有效环境值在服务器内通过管道传给新版本，避免将凭据输出到终端或报告。
+
+迁移成功后使用新 Compose 重建服务，移走活动 `.env` 中旧的业务和密码项。原有日志库不变；新建的 `control.sqlite3` 也须纳入备份。私人旧配置只作为受保护的回退资料保留，不加入源码或共享报告。
+
+## 忘记密码
+
+在服务器的项目目录执行交互式恢复：
+
+```sh
+docker compose exec ros-watch python -m roswatch.manage reset-password
+```
+
+命令通过隐藏输入读取新密码，不接受命令行密码参数。需要同时恢复用户名时追加 `--username 新用户名`。恢复会让所有旧网页登录失效，不删除日志。
 
 ## 接入 RouterOS
 
-先确认已有日志是否包含防火墙的 `input:` / `forward:`、入站接口、协议和 `来源->目标` 字段。普通系统日志、接口变化日志不能生成访问统计。
+将 ROS 防火墙 syslog 发到服务器 UDP 5514。记录应包含 `input:` / `forward:`、入站接口、协议和 `来源->目标`；普通系统日志不能生成访问统计。
 
-`routeros/ros-watch.rsc.example` 是**待审核、手动应用的模板**。本项目不会登录路由器、修改防火墙或执行封禁。模板默认未填写实际服务器地址，直接导入会停止。
+`routeros/ros-watch.rsc.example` 是待审核、手动应用的模板，默认文档地址直接导入会停止。项目不会自动登录或封禁路由器。模板新增独立 `action=log` 规则，四条规则分别限制 10 条/秒、突发 20 条，限速只影响日志，不应添加到现有 drop 规则上。
 
-模板以新建的独立 `action=log` 规则记录 WAN 的 TCP SYN / UDP 新状态报文，并把 `RW-` 前缀日志发往本服务。它不修改现有 accept/drop，不应把限速条件添加到现有 drop 规则。每条模板日志规则最多 10 条/秒、突发 20 条，四条规则的上限分别计算。
-
-- `RW-INPUT`：访问路由器自身的尝试。
+- `RW-INPUT`：访问路由器的尝试。
 - `RW-FWD`：经过 dstnat 的转发尝试。
-- `RW-DROP`：仅当你确认日志规则放在实际 drop 前、且条件对应拦截流量时使用；显示为“拦截前记录”。模板不会凭空判定拦截结果。
-- 其他已有的普通 RouterOS 防火墙日志：只有入站接口存在于 `WAN_MAP` 才接收；记录类别为“访问尝试”。
+- `RW-DROP`：只有日志规则确实放在匹配的 drop 前时才使用，显示为“拦截前记录”。
+- 其他普通防火墙日志：入站接口存在于后台 WAN 映射时接收，类别为“访问尝试”。
 
-接通后在“接收状态”查看最后收到时间、已写入数量和忽略原因；若 UDP 报文增加而记录不增加，检查格式与 WAN_MAP；“拒绝的非白名单来源”增加时检查 ROS 实际发送源和 ALLOWED_SENDERS（Docker 网络需保留发送源，标准 Linux bridge 发布 UDP 端口通常保留远端源地址）。
+接入后在“接收状态”核对有效记录与忽略原因。标准 Linux Docker bridge 发布 UDP 端口通常保留远端源地址，应填写 ROS 实际发送来源；不要为了排查而允许所有设备。
 
-### 统计口径
+## 统计口径
 
-- 数字表示**已收到且保留的日志观察次数**，不是独立成功连接数、用户数或 HTTP 请求数。TCP SYN 可能重传；UDP 未收到反向数据时也可能持续处于 new 状态。
-- 数据时间为服务器的接收时间（内部 UTC，显示为浏览器本地时区），不使用 BSD syslog 中缺少年份/时区的时间。请让 Debian 开启时间同步。
-- 转发日志中的目标地址/端口可能已被 NAT 转换。例如外网 11883 转到内网 1883，看板“所见目标”可能显示 1883；不能当成原始外网端口。
-- 疑似扫描：默认按 **UTC 对齐的 5 分钟固定窗口、同一来源至少 15 个不同目标端口**标记。慢速、跨窗口、分布式扫描可能漏报；正常探测也可能被标记。仅提供观察结果，不自动封禁。
-- ROS 日志限速导致的遗漏、网络或内核 UDP 丢包，接收端无法完整计数。默认 `SAMPLING_MODE=limited` 明示采样。`full` 只代表你确认发送端未限速，不能保证无丢包。
-- 本服务处理限速、队列满、超长报文、低磁盘/写入失败造成的丢弃会在界面单独列出；运行计数在服务重启后归零，保留记录仍在数据库中。
-- 概览统计有最多约 10 秒缓存。CSV 导出当前条件下最新 **10000 条**，不包含原始全文。
-
-## 控制资源和保留量
-
-| 配置                  | 默认值 | 说明                                             |
-| --------------------- | -----: | ------------------------------------------------ |
-| `RETENTION_DAYS`      |      7 | 最长保留天数                                     |
-| `MAX_ROWS`            | 500000 | 保留记录数目标上限，每约 30 秒清理，可能短暂超出 |
-| `MAX_DB_MB`           |    512 | SQLite 主库页数上限，80% 使用量触发旧数据清理    |
-| `MIN_FREE_MB`         |    256 | 可用空间低于此值暂停入库，界面显示丢弃           |
-| `INGEST_PER_SECOND`   |    500 | 全局令牌桶接收处理上限；超出报文丢弃并计数       |
-| `QUEUE_SIZE`          |   4096 | 内存等待队列上限（直接环境变量设置）             |
-| `SCAN_PORTS`          |     15 | 扫描识别不同端口阈值（直接环境变量设置）         |
-| `SCAN_WINDOW_SECONDS` |    300 | 固定扫描窗口（直接环境变量设置）                 |
-
-保留期、行数和容量以先达到的条件为准。数据库按最多 250 条/约 250 ms 批量提交，WAL 模式、定期 checkpoint；已删数据页可复用，主库文件不一定立即缩小。`MAX_DB_MB` **不是整个卷的硬配额**：WAL/SHM、会话密钥和文件系统开销额外占用空间，降低已有数据库的设置也不会立即缩小文件。Compose 已为容器运行日志设置独立轮转（5 MiB × 2）；宿主机/ESXi 数据存储仍需保留空间。
-
-如必须严格隔离磁盘占用，应在 Debian 层使用有配额的目录/文件系统；仅靠 Docker 的内存限制不能限制整个磁盘。
+- 统计为已收到且保留的日志观察次数，不是成功连接、用户或 HTTP 请求数。TCP SYN 可能重传，UDP 无反向数据时也可能持续处于 new 状态。
+- 采用服务器接收时间（内部 UTC、浏览器本地时区展示），请保持系统时间同步。
+- 转发目标可能已被 NAT 转换，例如外网 11883 转到内网 1883，所见目标可能显示 1883。
+- 扫描按 UTC 对齐的固定窗口与同源不同目标端口数判断，可能误报或漏报，仅提示，不自动封禁。
+- 处理限速、队列满、超长、低磁盘及写入失败丢弃可计数；ROS 限速和不可观测的网络/内核 UDP 丢包无法准确计数。界面明确展示采样模式。
+- 运行计数在服务重启后归零，持久化记录仍保留。概览最多约 10 秒缓存；改设置会清理概览缓存。
+- CSV 导出当前筛选最新 10000 条，不含原始全文。
 
 ## 更新与备份
 
-更新源码后运行 `docker compose up -d --build`。数据库当前没有外部依赖，使用 SQLite 在线备份 API 导出一致性副本，例如：
+更新源码后执行 `docker compose up -d --build`。备份包含完整持久卷中的账号库、日志库、会话密钥及需要的部署配置。可停服务后备份卷；运行时请使用 SQLite 备份 API 导出一致性副本，不要只复制正在写入的单个日志库而忽略 WAL。含密码哈希、日志地址和初始凭据的备份也应按私人数据保护。
+
+## 开发验证
+
+Python 3.13+；安装 `requirements-dev.txt` 后执行：
 
 ```sh
-docker compose exec ros-watch python -c "import sqlite3; a=sqlite3.connect('/data/events.sqlite3'); b=sqlite3.connect('/data/backup.sqlite3'); a.backup(b); b.close(); a.close()"
+python -m pytest -q -p no:cacheprovider
+docker build --target test -t ros-watch-tests .
 ```
 
-备份副本生成在命名卷 `/data/backup.sqlite3`，应取出到外部备份位置，并及时移走卷内副本以避免占用日志预算。备份还应包含 `.env` 和 `/data/session.key`（私人文件，禁止提交仓库）。也可停止容器后备份整个命名卷；不要直接复制正在写入的单个 sqlite3 文件而忽略 WAL。
+测试依赖不进入生产镜像。使用项目外的临时数据目录运行 `python -m roswatch`；首次凭据保存在该目录。设置 `DEMO_MODE=true` 和 `HTTP_HOST=127.0.0.1` 可生成文档地址演示数据（必须绑定回环），不要把演示库接入生产。
 
-## 本地开发与演示
-
-Python 3.13+，建议项目外创建虚拟环境后安装 `requirements.txt`。在项目目录中设置环境变量后运行 `python -m roswatch`。
-
-```powershell
-$env:APP_PASSWORD='自行设置至少12位密码'
-$env:ALLOWED_SENDERS='127.0.0.1'
-$env:HTTP_HOST='127.0.0.1'
-$env:SYSLOG_HOST='127.0.0.1'
-$env:DATA_DIR=Join-Path $env:TEMP 'ros-watch-demo'
-$env:DEMO_MODE='true'
-python -m roswatch
-```
-
-访问 `http://127.0.0.1:8080`。演示使用 RFC5737 文档地址生成合成记录，页面有明显提示；演示模式禁止绑定到所有网卡。生产请关闭 DEMO_MODE，并使用全新的数据卷，不要混入合成记录。
-
-开发验证先安装 `requirements-dev.txt`，然后运行 `python -m pytest -q -p no:cacheprovider`。Linux 容器验证可运行 `docker build --target test -t ros-watch-tests .`，测试依赖不会进入生产镜像。`tools/send_sample.py` 可向测试实例发送仅使用文档地址的 UDP 示例；不要把模拟记录发送到生产实例。`tools/load_probe.py` 用于本地限时链路与资源探测，不会访问真实路由器。
+`tools/send_sample.py` / `tools/load_probe.py` 仅供有限模拟验证，不要向生产数据库发送模拟流量。工具临时认证参数与服务的持久账号配置相互独立。
 
 ## 官方资料
 
 - [RouterOS 日志](https://manual.mikrotik.com/docs/diagnostics-monitoring-and-troubleshooting/log/)
-- [RouterOS 防火墙日志与匹配器](https://manual.mikrotik.com/docs/firewall-and-quality-of-service/firewall/common-firewall-matchers-and-actions/)
 - [Flask 使用 Waitress 部署](https://flask.palletsprojects.com/en/stable/deploying/waitress/)
+- [OWASP 密码存储](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+- [Docker 环境变量与 Secrets](https://docs.docker.com/compose/how-tos/environment-variables/best-practices/)

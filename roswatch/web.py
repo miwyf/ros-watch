@@ -8,17 +8,32 @@ import threading
 import time
 from collections import OrderedDict
 from datetime import timedelta
+from dataclasses import asdict
 from functools import wraps
 
-from flask import Flask, Response, jsonify, redirect, render_template, request, session
-from werkzeug.security import check_password_hash, generate_password_hash
+from flask import (
+    Flask,
+    Response,
+    g,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    session,
+)
 
 from . import __version__
+from .config import Settings
+from .control import Control
 
 
-def create_app(config, store, collector):
+def create_app(config, store, collector, control=None):
     config.validate()
+    control = control or Control(config)
+    control.bootstrap()
+    collector.apply_settings(control.load_settings())
     app = Flask(__name__)
+    app.extensions["control"] = control
     secret_file = config.data_dir / "session.key"
     if not secret_file.exists():
         with secret_file.open("xb") as f:
@@ -26,18 +41,17 @@ def create_app(config, store, collector):
         secret_file.chmod(0o600)
     app.config.update(
         SECRET_KEY=secret_file.read_bytes(),
-        MAX_CONTENT_LENGTH=4096,
+        MAX_CONTENT_LENGTH=16384,
+        MAX_FORM_MEMORY_SIZE=16384,
+        MAX_FORM_PARTS=20,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Strict",
         SESSION_COOKIE_SECURE=config.cookie_secure,
         PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
     )
-    password_hash = generate_password_hash(config.password)
-    auth_marker = hmac.new(
-        app.secret_key, config.password.encode(), "sha256"
-    ).hexdigest()
     failures = OrderedDict()
     rate_lock, query_lock = threading.Lock(), threading.Lock()
+    settings_lock = threading.Lock()
     cache = OrderedDict()
 
     @app.after_request
@@ -56,18 +70,35 @@ def create_app(config, store, collector):
     def auth_required(fn):
         @wraps(fn)
         def wrapped(*args, **kwargs):
-            if session.get("authenticated") != auth_marker:
+            account = control.account()
+            if not hmac.compare_digest(
+                str(session.get("authenticated", "")), account["revision"]
+            ):
                 if request.path.startswith("/api/"):
                     return jsonify(error="请先登录"), 401
                 return redirect("/login")
+            g.account = account
             return fn(*args, **kwargs)
 
         return wrapped
 
     def csrf_ok():
         return hmac.compare_digest(
-            session.get("csrf", "_missing"), request.form.get("csrf", "")
+            session.get("csrf", "_missing"),
+            request.headers.get("X-CSRF-Token", "") or request.form.get("csrf", ""),
         )
+
+    def reserve_auth_attempt():
+        now, key = time.monotonic(), request.remote_addr
+        with rate_lock:
+            attempts = [t for t in failures.get(key, []) if now - t < 300]
+            total = [t for t in failures.get("global", []) if now - t < 60]
+            if len(attempts) >= 5 or len(total) >= 20:
+                return False
+            failures[key], failures["global"] = attempts + [now], total + [now]
+            while len(failures) > 1024:
+                failures.popitem(last=False)
+        return True
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -76,30 +107,24 @@ def create_app(config, store, collector):
         if request.method == "POST":
             if not csrf_ok():
                 return "请从登录页面提交", 400
-            now, key = time.monotonic(), request.remote_addr
-            with rate_lock:
-                attempts = [t for t in failures.get(key, []) if now - t < 300]
-                global_attempts = [
-                    t for t in failures.get("global", []) if now - t < 60
-                ]
-                if len(attempts) >= 5 or len(global_attempts) >= 20:
-                    error, code = "尝试过于频繁，请稍后重试", 429
-                else:
-                    failures[key] = attempts + [now]
-                    failures["global"] = global_attempts + [now]
-                    while len(failures) > 1024:
-                        failures.popitem(last=False)
+            if not reserve_auth_attempt():
+                error, code = "尝试过于频繁，请稍后重试", 429
             if not error:
-                if check_password_hash(password_hash, request.form.get("password", "")):
+                account = control.authenticate(
+                    request.form.get("username", "").strip(),
+                    request.form.get("password", ""),
+                )
+                if account:
                     session.clear()
                     session.update(
-                        authenticated=auth_marker, csrf=secrets.token_urlsafe(24)
+                        authenticated=account["revision"],
+                        csrf=secrets.token_urlsafe(24),
                     )
                     session.permanent = True
                     with rate_lock:
-                        failures.pop(key, None)
+                        failures.pop(request.remote_addr, None)
                     return redirect("/")
-                error, code = "密码不正确", 401
+                error, code = "用户名或密码不正确", 401
         return render_template(
             "login.html", csrf=session["csrf"], error=error, version=__version__
         ), code
@@ -115,7 +140,79 @@ def create_app(config, store, collector):
     @app.get("/")
     @auth_required
     def index():
-        return render_template("index.html", csrf=session["csrf"], version=__version__)
+        return render_template(
+            "index.html",
+            csrf=session["csrf"],
+            username=g.account["username"],
+            version=__version__,
+        )
+
+    @app.route("/api/account", methods=["GET", "POST"])
+    @auth_required
+    def account_settings():
+        if request.method == "GET":
+            return jsonify(username=g.account["username"])
+        if not csrf_ok():
+            return jsonify(error="页面验证已过期，请刷新后重试"), 400
+        if not reserve_auth_attempt():
+            return jsonify(error="尝试过于频繁，请稍后重试"), 429
+        body = request.get_json()
+        if not isinstance(body, dict) or not all(
+            isinstance(body.get(k, ""), str)
+            for k in (
+                "username",
+                "current_password",
+                "new_password",
+                "confirm_password",
+            )
+        ):
+            return jsonify(error="账号设置格式无效"), 400
+        password = body.get("new_password", "")
+        if password != body.get("confirm_password", ""):
+            return jsonify(error="两次新密码不一致"), 400
+        try:
+            changed = control.change_account(
+                g.account["revision"],
+                body.get("current_password", ""),
+                body.get("username", "").strip(),
+                password or None,
+            )
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        if not changed:
+            return jsonify(error="当前密码不正确，请重新输入"), 403
+        with rate_lock:
+            failures.pop(request.remote_addr, None)
+        session.clear()
+        return jsonify(
+            message="账号已更新，请使用新账号信息重新登录", redirect="/login?changed=1"
+        )
+
+    @app.route("/api/settings", methods=["GET", "POST"])
+    @auth_required
+    def runtime_settings():
+        if request.method == "GET":
+            return jsonify(settings=asdict(config.settings))
+        if not csrf_ok():
+            return jsonify(error="页面验证已过期，请刷新后重试"), 400
+        try:
+            body = request.get_json()
+            if not isinstance(body, dict) or set(body) != set(
+                Settings.__dataclass_fields__
+            ):
+                raise ValueError("请提交完整的运行设置")
+            settings = Settings.from_dict(body)
+        except (ValueError, TypeError) as exc:
+            return jsonify(error=str(exc)), 400
+        with settings_lock:
+            control.save_settings(settings)
+            collector.apply_settings(settings)
+            with query_lock:
+                cache.clear()
+        return jsonify(
+            settings=asdict(settings),
+            message="设置已保存并生效；保留策略由后台清理任务执行",
+        )
 
     @app.get("/healthz")
     def health():
@@ -129,7 +226,7 @@ def create_app(config, store, collector):
     def filters():
         now = time.time()
         hours = float(request.args.get("hours", 24))
-        if not 0 < hours <= min(config.retention_days * 24, 31 * 24):
+        if not 0 < hours <= min(config.settings.retention_days * 24, 31 * 24):
             raise ValueError("时间范围超出保留期限")
         f = {"since": now - hours * 3600, "until": now}
         choices = {

@@ -6,6 +6,7 @@ from waitress import create_server
 
 from .collector import Collector
 from .config import Config
+from .control import Control
 from .storage import Store
 from .web import create_app
 
@@ -16,9 +17,15 @@ def main():
     )
     config = Config()
     config.validate()
+    control = Control(config)
+    if control.bootstrap():
+        logging.info(
+            "Initial administrator credentials saved in data directory: initial-admin.txt"
+        )
+    config.settings = control.load_settings()
     store = Store(config)
     collector = Collector(config, store)
-    app = create_app(config, store, collector)
+    app = create_app(config, store, collector, control)
     if config.demo:
         from .demo import seed
 
@@ -31,7 +38,7 @@ def main():
         threads=4,
         connection_limit=64,
         channel_timeout=30,
-        max_request_body_size=4096,
+        max_request_body_size=16384,
         clear_untrusted_proxy_headers=True,
         ident="ROS-Watch",
     )

@@ -51,6 +51,7 @@ def resource_reader():
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--username", default="admin")
     p.add_argument("--url", default="http://127.0.0.1:8080")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=5514)
@@ -75,7 +76,9 @@ def main():
     csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
     op.open(
         a.url + "/login",
-        data=urllib.parse.urlencode({"csrf": csrf, "password": password}).encode(),
+        data=urllib.parse.urlencode(
+            {"csrf": csrf, "username": a.username, "password": password}
+        ).encode(),
         timeout=5,
     ).close()
     initial = get()["status"]

@@ -1,3 +1,4 @@
+from dataclasses import replace
 import socket
 import os
 import time
@@ -94,7 +95,7 @@ def test_real_udp_to_sqlite_and_api(collector, store, client):
 def test_queue_and_sender_protection(config, store):
     from roswatch.collector import Collector
 
-    config.queue_size = 1
+    config.settings = replace(config.settings, queue_size=1)
     c = Collector(config, store)
     raw = event()["raw"].encode()
     c.accept(raw, "203.0.113.1")
@@ -119,13 +120,10 @@ def test_disk_low_is_visible(collector, store, monkeypatch):
 
 
 def test_invalid_configuration_fails(config):
-    config.password = "weak"
+    config.settings = replace(config.settings, max_db_mb=1)
     with pytest.raises(ValueError):
         config.validate()
-    config.password = "test-password-12345"
-    config.allowed_senders = ""
-    with pytest.raises(ValueError):
-        config.validate()
+    config.settings = replace(config.settings, max_db_mb=512)
     config.demo = True
     config.http_host = "0.0.0.0"
     with pytest.raises(ValueError):

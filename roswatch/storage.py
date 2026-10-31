@@ -44,7 +44,7 @@ class Store:
                 db.execute("PRAGMA synchronous=NORMAL")
                 db.execute("PRAGMA wal_autocheckpoint=256")
                 db.execute(
-                    f"PRAGMA max_page_count={self.config.max_db_mb * 1024 * 1024 // db.execute('PRAGMA page_size').fetchone()[0]}"
+                    f"PRAGMA max_page_count={self.config.settings.max_db_mb * 1024 * 1024 // db.execute('PRAGMA page_size').fetchone()[0]}"
                 )
             # A malformed query/filter cannot hold the reader indefinitely.
             deadline = time.monotonic() + 4
@@ -78,12 +78,12 @@ class Store:
             with self.connect() as db:
                 deleted = db.execute(
                     "DELETE FROM events WHERE ts < ?",
-                    (now - self.config.retention_days * 86400,),
+                    (now - self.config.settings.retention_days * 86400,),
                 ).rowcount
                 # Sequential integer ids make the row cap inexpensive without COUNT(*).
                 threshold = db.execute(
                     "SELECT id FROM events ORDER BY id DESC LIMIT 1 OFFSET ?",
-                    (self.config.max_rows,),
+                    (self.config.settings.max_rows,),
                 ).fetchone()
                 if threshold:
                     deleted += db.execute(
@@ -92,7 +92,7 @@ class Store:
                 pages = db.execute("PRAGMA page_count").fetchone()[0]
                 free = db.execute("PRAGMA freelist_count").fetchone()[0]
                 max_pages = (
-                    self.config.max_db_mb
+                    self.config.settings.max_db_mb
                     * 1024
                     * 1024
                     // db.execute("PRAGMA page_size").fetchone()[0]
@@ -122,7 +122,7 @@ class Store:
     def disk_ok(self):
         return (
             shutil.disk_usage(self.config.data_dir).free
-            >= self.config.min_free_mb * 1024 * 1024
+            >= self.config.settings.min_free_mb * 1024 * 1024
         )
 
     def query(self, filters, limit=50, before=None):
@@ -191,7 +191,11 @@ class Store:
                 GROUP BY src,window HAVING ports >= ?
               ) GROUP BY src ORDER BY ports DESC,n DESC LIMIT 20
             """,
-                    (self.config.scan_window, *params, self.config.scan_ports),
+                    (
+                        self.config.settings.scan_window,
+                        *params,
+                        self.config.settings.scan_ports,
+                    ),
                 )
             ]
             coverage = dict(

@@ -13,8 +13,9 @@ from .parser import parse_message
 class Collector:
     def __init__(self, config, store):
         self.config, self.store = config, store
-        self.networks = config.validate()
-        self.queue = queue.Queue(maxsize=config.queue_size)
+        config.validate()
+        self.runtime = (config.settings, config.settings.networks())
+        self.queue = queue.Queue(maxsize=config.settings.queue_size)
         self.stop_event = threading.Event()
         self.counts = Counter()
         self.mutex = threading.Lock()
@@ -24,7 +25,7 @@ class Collector:
         self.error = ""
         self.threads = []
         self.sock = None
-        self.tokens = float(config.ingest_per_second)
+        self.tokens = float(config.settings.ingest_per_second)
         self.last_token_time = time.monotonic()
 
     def increment(self, key, n=1):
@@ -32,9 +33,10 @@ class Collector:
             self.counts[key] += n
 
     def accept(self, data, sender, now=None):
+        settings, networks = self.runtime
         self.increment("received")
         address = ipaddress.ip_address(sender)
-        if not any(address in network for network in self.networks):
+        if not any(address in network for network in networks):
             self.increment("untrusted")
             return
         if len(data) > 4096:
@@ -42,15 +44,15 @@ class Collector:
             return
         tick = time.monotonic()
         self.tokens = min(
-            self.config.ingest_per_second,
-            self.tokens + (tick - self.last_token_time) * self.config.ingest_per_second,
+            settings.ingest_per_second,
+            self.tokens + (tick - self.last_token_time) * settings.ingest_per_second,
         )
         self.last_token_time = tick
         if self.tokens < 1:
             self.increment("rate_dropped")
             return
         self.tokens -= 1
-        event = parse_message(data, sender, self.config.wan_map, now)
+        event = parse_message(data, sender, settings.wan_map, now)
         if not event:
             self.increment("ignored")
             return
@@ -60,6 +62,16 @@ class Collector:
             self.increment("parsed")
         except queue.Full:
             self.increment("queue_dropped")
+
+    def apply_settings(self, settings):
+        networks = settings.networks()
+        with self.store.lock:
+            self.config.settings = settings
+            self.runtime = (settings, networks)
+            self.store.last_maintenance = 0
+        with self.queue.mutex:
+            self.queue.maxsize = settings.queue_size
+            self.queue.not_full.notify_all()
 
     def start(self):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -141,12 +153,13 @@ class Collector:
             "error": self.error,
             "db_bytes": self.store.disk_usage(),
             "pruned": self.store.pruned,
-            "sampling": self.config.sampling,
+            "sampling": self.config.settings.sampling,
             "demo": self.config.demo,
-            "scan_ports": self.config.scan_ports,
-            "scan_window": self.config.scan_window,
-            "retention_days": self.config.retention_days,
-            "max_db_mb": self.config.max_db_mb,
+            "scan_ports": self.config.settings.scan_ports,
+            "scan_window": self.config.settings.scan_window,
+            "retention_days": self.config.settings.retention_days,
+            "max_db_mb": self.config.settings.max_db_mb,
+            "sources_configured": bool(self.config.settings.allowed_senders),
         }
 
     def stop(self):

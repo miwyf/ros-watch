@@ -31,8 +31,8 @@ function params(search = false) {
       if ($(k).value.trim()) p.set(k, $(k).value.trim());
   return p;
 }
-async function api(path) {
-  const r = await fetch(path, { credentials: "same-origin" });
+async function api(path, options = {}) {
+  const r = await fetch(path, { ...options, credentials: "same-origin" });
   if (r.status === 401) {
     location.assign("/login");
     throw Error("登录已过期");
@@ -49,7 +49,22 @@ function fail(message) {
 }
 function showView(name) {
   view = name;
-  for (const v of ["overview", "events", "system"])
+  window.scrollTo({ top: 0, behavior: "instant" });
+  const titles = {
+    overview: "外部访问，一目了然",
+    events: "访问记录",
+    system: "接收状态",
+    settings: "系统设置",
+  };
+  $("page-title").replaceChildren(
+    document.createTextNode(titles[name]),
+    node("span", ".", "accent"),
+  );
+  document.querySelector(".subtitle").textContent =
+    name === "settings"
+      ? "参数保存后生效，重建容器后依然保留。"
+      : "从连接尝试中发现变化，掌握你的网络边界。";
+  for (const v of ["overview", "events", "system", "settings"])
     $(v + "-view").classList.toggle("hidden", name !== v);
   document
     .querySelectorAll("[data-view]")
@@ -58,7 +73,13 @@ function showView(name) {
     overview: "访问概览",
     events: "访问记录",
     system: "接收状态",
+    settings: "系统设置",
   }[name];
+  document
+    .querySelector(".filterbar")
+    .classList.toggle("hidden", name === "settings");
+  $("refresh").classList.toggle("hidden", name === "settings");
+  if (name === "settings") window.loadSettings?.();
   if (name === "events") {
     cursor = null;
     refreshEvents().catch((e) => fail(e.message));
@@ -287,6 +308,8 @@ function status(s, coverage) {
       : s.sampling === "full"
         ? "按配置接收完整记录；UDP 传输仍可能丢失。"
         : "尚未确认 ROS 端是否限速，当前仅统计已收到的日志。";
+  if (!s.sources_configured)
+    text += " 尚未设置日志来源白名单，请在系统设置中填写后开始接收。";
   if (!coverage.stored)
     text +=
       " 尚未收到有效 WAN 日志，请检查发送目标、发送来源白名单及 WAN 接口映射。";

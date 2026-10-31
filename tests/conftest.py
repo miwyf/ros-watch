@@ -1,7 +1,8 @@
 import pytest
 
 from roswatch.collector import Collector
-from roswatch.config import Config
+from roswatch.config import Config, Settings
+from roswatch.control import Control
 from roswatch.parser import parse_message
 from roswatch.storage import Store
 from roswatch.web import create_app
@@ -28,11 +29,9 @@ def event(
 def config(tmp_path):
     return Config(
         data_dir=tmp_path,
-        password="test-password-12345",
-        allowed_senders="127.0.0.1/32",
+        settings=Settings(allowed_senders="127.0.0.1/32", min_free_mb=0),
         syslog_host="127.0.0.1",
         syslog_port=0,
-        min_free_mb=0,
     )
 
 
@@ -50,7 +49,9 @@ def collector(config, store):
 
 @pytest.fixture
 def client(config, store, collector):
-    app = create_app(config, store, collector)
+    control = Control(config)
+    control.bootstrap("admin", "test-password-12345")
+    app = create_app(config, store, collector, control)
     app.config["TESTING"] = True
     return app.test_client()
 
@@ -59,4 +60,7 @@ def login(client):
     client.get("/login")
     with client.session_transaction() as s:
         csrf = s["csrf"]
-    return client.post("/login", data={"password": "test-password-12345", "csrf": csrf})
+    return client.post(
+        "/login",
+        data={"username": "admin", "password": "test-password-12345", "csrf": csrf},
+    )
