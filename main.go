@@ -50,16 +50,8 @@ func run() error {
 		case "version":
 			fmt.Println("ROS Watch", Version, "(Go)")
 			return nil
-		case "initial-account":
-			f, err := os.Open(config.DataDir + string(os.PathSeparator) + "initial-admin.txt")
-			if err != nil {
-				return errors.New("initial credential file unavailable; use reset-password if needed")
-			}
-			defer f.Close()
-			_, err = io.Copy(os.Stdout, f)
-			return err
 		default:
-			return errors.New("usage: ros-watch [version|healthcheck|initial-account|reset-password [--username NAME]]")
+			return errors.New("usage: ros-watch [version|healthcheck|reset-password [--username NAME]]")
 		}
 	}
 	app, err := newApp(config)
@@ -87,9 +79,6 @@ func run() error {
 	stopped := make(chan error, 1)
 	go func() { stopped <- server.Serve(netutil.LimitListener(listener, 64)) }()
 	log.Printf("ROS Watch %s (Go) started; HTTP %d, UDP %d", Version, config.HTTPPort, config.SyslogPort)
-	if _, err := os.Stat(config.DataDir + string(os.PathSeparator) + "initial-admin.txt"); err == nil {
-		log.Print("Initial credentials are available in the private data volume: initial-admin.txt")
-	}
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(signals)

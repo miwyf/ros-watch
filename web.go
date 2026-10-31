@@ -71,10 +71,6 @@ func newApp(config Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err = control.bootstrap("admin", "", defaultSettings()); err != nil {
-		control.db.Close()
-		return nil, err
-	}
 	settings, err := control.loadSettings(context.Background())
 	if err != nil {
 		control.db.Close()
@@ -136,6 +132,8 @@ func apiError(w http.ResponseWriter, code int, message string) {
 func (a *App) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
+	mux.HandleFunc("GET /setup", a.setup)
+	mux.HandleFunc("POST /setup", a.setup)
 	mux.HandleFunc("GET /login", a.login)
 	mux.HandleFunc("POST /login", a.login)
 	mux.HandleFunc("POST /logout", a.logout)
@@ -220,7 +218,18 @@ func (a *App) authorized(w http.ResponseWriter, r *http.Request) (Account, sessi
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			apiError(w, 401, "请先登录")
 		} else {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			destination := "/login"
+			ctx, cancel := boundedContext(r.Context())
+			defer cancel()
+			initialized, err := a.control.initialized(ctx)
+			if err != nil {
+				apiError(w, 503, "账号暂不可用")
+				return account, s, false
+			}
+			if !initialized {
+				destination = "/setup"
+			}
+			http.Redirect(w, r, destination, http.StatusSeeOther)
 		}
 	}
 	return account, s, ok
@@ -287,7 +296,92 @@ func (a *App) render(w http.ResponseWriter, name string, code int, data pageData
 	_, _ = io.WriteString(w, output.String())
 }
 
+func (a *App) setup(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := boundedContext(r.Context())
+	defer cancel()
+	initialized, err := a.control.initialized(ctx)
+	if err != nil {
+		apiError(w, 503, "账号暂不可用")
+		return
+	}
+	if initialized {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	s, valid := a.readSession(r)
+	message, username, code := "", "admin", http.StatusOK
+	if r.Method == http.MethodPost {
+		if err := r.ParseForm(); err != nil || !valid || !validCSRF(r, s) {
+			apiError(w, 400, "请从创建账号页面提交")
+			return
+		}
+		username = strings.TrimSpace(r.PostFormValue("username"))
+		password := r.PostFormValue("password")
+		switch {
+		case !usernamePattern.MatchString(username):
+			message, code = "用户名须为 3–32 位字母、数字、点、下划线或短横线", 400
+		case !validPassword(password, 15):
+			message, code = "密码须为 15–128 位，可以使用长密码或口令", 400
+		case password != r.PostFormValue("confirm_password"):
+			message, code = "两次密码不一致", 400
+		case !a.reserveAttempt(r):
+			message, code = "尝试过于频繁，请稍后重试", 429
+		default:
+			created, err := a.control.createAccount(ctx, username, password)
+			if err != nil {
+				apiError(w, 503, "账号创建暂不可用，请重试")
+				return
+			}
+			if !created {
+				http.Redirect(w, r, "/login", http.StatusSeeOther)
+				return
+			}
+			account, err := a.control.account(ctx)
+			if err != nil {
+				apiError(w, 503, "账号已创建，请前往登录页面登录")
+				return
+			}
+			token, err := randomToken(24)
+			if err != nil {
+				apiError(w, 500, "账号已创建，请前往登录页面登录")
+				return
+			}
+			if err = a.writeSession(w, session{Revision: account.Revision, CSRF: token}); err != nil {
+				apiError(w, 500, "账号已创建，请前往登录页面登录")
+				return
+			}
+			a.clearAttempts(r)
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+	}
+	if !valid {
+		token, err := randomToken(24)
+		if err != nil {
+			apiError(w, 500, "创建账号页面暂不可用")
+			return
+		}
+		s = session{CSRF: token}
+	}
+	if err := a.writeSession(w, s); err != nil {
+		apiError(w, 500, "创建账号页面暂不可用")
+		return
+	}
+	a.render(w, "setup.html", code, pageData{CSRF: s.CSRF, Username: username, Version: Version, Error: message})
+}
+
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := boundedContext(r.Context())
+	initialized, err := a.control.initialized(ctx)
+	cancel()
+	if err != nil {
+		apiError(w, 503, "账号暂不可用")
+		return
+	}
+	if !initialized {
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
 	s, valid := a.readSession(r)
 	message := ""
 	code := 200

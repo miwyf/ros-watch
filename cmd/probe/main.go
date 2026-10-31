@@ -2,6 +2,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -37,10 +38,14 @@ func (p *probe) get(path string) (map[string]any, error) {
 	err = json.NewDecoder(r.Body).Decode(&result)
 	return result, err
 }
-func (p *probe) login(username, password string) error {
-	r, err := p.client.Get(p.base + "/login")
+func (p *probe) setup() error {
+	r, err := p.client.Get(p.base + "/setup")
 	if err != nil {
 		return err
+	}
+	if r.Request.URL.Path != "/setup" {
+		r.Body.Close()
+		return errors.New("probe requires an uninitialized isolated instance")
 	}
 	data, _ := io.ReadAll(r.Body)
 	r.Body.Close()
@@ -48,7 +53,8 @@ func (p *probe) login(username, password string) error {
 	if token == nil {
 		return errors.New("missing form token")
 	}
-	r, err = p.client.PostForm(p.base+"/login", url.Values{"username": {username}, "password": {password}, "csrf": {string(token[1])}})
+	password := rand.Text()
+	r, err = p.client.PostForm(p.base+"/setup", url.Values{"username": {"probe-owner"}, "password": {password}, "confirm_password": {password}, "csrf": {string(token[1])}})
 	if err != nil {
 		return err
 	}
@@ -56,7 +62,7 @@ func (p *probe) login(username, password string) error {
 	r.Body.Close()
 	token = regexp.MustCompile(`name="csrf-token"\s+content="([^"]+)"`).FindSubmatch(data)
 	if r.StatusCode != 200 || token == nil {
-		return errors.New("login failed")
+		return errors.New("test account creation failed")
 	}
 	p.csrf = string(token[1])
 	return nil
@@ -143,7 +149,6 @@ func processResource(executable string) func() *resource {
 func run() error {
 	base := flag.String("url", "http://127.0.0.1:8080", "Isolated dashboard URL")
 	udp := flag.String("udp", "127.0.0.1:5514", "Isolated UDP destination")
-	credentials := flag.String("credentials", "/data/initial-admin.txt", "Test instance initial credential file")
 	seconds := flag.Int("seconds", 15, "Duration, 1–60 seconds")
 	rate := flag.Int("rate", 100, "Rate, 1–1000 records/s")
 	executable := flag.String("process", "ros-watch", "Executable basename for Linux process resource sampling")
@@ -151,23 +156,12 @@ func run() error {
 	if *seconds < 1 || *seconds > 60 || *rate < 1 || *rate > 1000 {
 		return errors.New("invalid finite probe bounds")
 	}
-	raw, err := os.ReadFile(*credentials)
-	if err != nil {
-		return errors.New("test credential file unavailable")
-	}
-	values := map[string]string{}
-	for _, line := range strings.Split(string(raw), "\n") {
-		k, v, ok := strings.Cut(line, ": ")
-		if ok {
-			values[k] = v
-		}
-	}
 	jar, _ := cookiejar.New(nil)
 	p := probe{client: &http.Client{Jar: jar, Timeout: 8 * time.Second, Transport: &http.Transport{Proxy: nil}}, base: *base}
-	if err = p.login(values["Username"], values["Password"]); err != nil {
+	if err := p.setup(); err != nil {
 		return err
 	}
-	if err = p.settings(); err != nil {
+	if err := p.settings(); err != nil {
 		return err
 	}
 	initial, err := p.status()

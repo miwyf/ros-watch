@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/netip"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -79,32 +77,6 @@ func TestQueryCancellationDoesNotBreakNextRead(t *testing.T) {
 	rows, err := queryMaps(context.Background(), a.store.reader, "SELECT COUNT(*) n FROM events")
 	if err != nil || number(rows[0]["n"]) != 0 {
 		t.Fatal("connection not recovered", err)
-	}
-}
-
-func TestNewInstallCredentialsRemovedAfterAccountUpdate(t *testing.T) {
-	cfg := Config{DataDir: t.TempDir(), HTTPHost: "127.0.0.1"}
-	a, err := newApp(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.close()
-	content, err := os.ReadFile(filepath.Join(cfg.DataDir, "initial-admin.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(string(content), "\n")
-	password := strings.TrimPrefix(lines[1], "Password: ")
-	account, _ := a.control.account(context.Background())
-	if len(password) < 24 {
-		t.Fatal("weak initial password")
-	}
-	ok, err := a.control.changeAccount(context.Background(), account.Revision, password, "owner", "")
-	if err != nil || !ok {
-		t.Fatal(err)
-	}
-	if _, err = os.Stat(filepath.Join(cfg.DataDir, "initial-admin.txt")); !os.IsNotExist(err) {
-		t.Fatal("initial credential file retained")
 	}
 }
 

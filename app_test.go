@@ -33,7 +33,13 @@ func testApp(t *testing.T) *App {
 	s := defaultSettings()
 	s.AllowedSenders = "127.0.0.1"
 	s.MinFreeMB = 0
-	if _, err = control.bootstrap("admin", "test-account-password", s); err != nil {
+	if _, err = control.createAccount(context.Background(), "admin", "test-account-password"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.validate(); err != nil {
+		t.Fatal(err)
+	}
+	if err = control.saveSettings(context.Background(), s); err != nil {
 		t.Fatal(err)
 	}
 	control.db.Close()
@@ -150,7 +156,7 @@ func TestAccountAndSettingsPersist(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.db.Close()
-	if made, err := second.bootstrap("wrong", "different-test-password", defaultSettings()); err != nil || made {
+	if made, err := second.createAccount(context.Background(), "wrong", "different-test-password"); err != nil || made {
 		t.Fatal("existing account overwritten")
 	}
 	_, ok, err := second.authenticate(context.Background(), "admin", "test-account-password")
@@ -358,7 +364,7 @@ func TestRealUDPToSQLiteAndHTTP(t *testing.T) {
 
 func TestTemplatesRender(t *testing.T) {
 	a := testApp(t)
-	for _, name := range []string{"login.html", "index.html"} {
+	for _, name := range []string{"login.html", "index.html", "setup.html"} {
 		var output bytes.Buffer
 		if err := a.templates.ExecuteTemplate(&output, name, pageData{CSRF: "test-token", Version: Version}); err != nil {
 			t.Fatal(err)

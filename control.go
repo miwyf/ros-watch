@@ -28,7 +28,6 @@ type Account struct {
 }
 type Control struct {
 	db     *sql.DB
-	dir    string
 	authMu sync.Mutex
 }
 
@@ -92,13 +91,17 @@ func openControl(dir string) (*Control, error) {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS account(id INTEGER PRIMARY KEY CHECK(id=1),username TEXT NOT NULL,password_hash TEXT NOT NULL,revision TEXT NOT NULL,updated_at REAL NOT NULL);
  CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1),value TEXT NOT NULL);`)
 	if err == nil {
+		value, _ := json.Marshal(defaultSettings())
+		_, err = db.Exec("INSERT INTO settings VALUES(1,?) ON CONFLICT(id) DO NOTHING", string(value))
+	}
+	if err == nil {
 		err = os.Chmod(path, 0600)
 	}
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
-	return &Control{db: db, dir: dir}, nil
+	return &Control{db: db}, nil
 }
 
 func (c *Control) account(ctx context.Context) (Account, error) {
@@ -107,26 +110,19 @@ func (c *Control) account(ctx context.Context) (Account, error) {
 	return a, err
 }
 
-func (c *Control) bootstrap(username, password string, settings Settings) (bool, error) {
+func (c *Control) initialized(ctx context.Context) (bool, error) {
+	var exists bool
+	err := c.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM account WHERE id=1)").Scan(&exists)
+	return exists, err
+}
+
+func (c *Control) createAccount(ctx context.Context, username, password string) (bool, error) {
+	if !usernamePattern.MatchString(username) || !validPassword(password, 15) {
+		return false, errors.New("用户名须为 3–32 位字母、数字、点、下划线或短横线；密码须为 15–128 位")
+	}
 	c.authMu.Lock()
 	defer c.authMu.Unlock()
-	if _, err := c.account(context.Background()); err == nil {
-		return false, nil
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return false, err
-	}
-	generated := password == ""
-	var err error
-	if generated {
-		password, err = randomToken(24)
-		if err != nil {
-			return false, err
-		}
-	}
-	if !usernamePattern.MatchString(username) || !validPassword(password, 12) {
-		return false, errors.New("初始账号或密码格式无效")
-	}
-	if err = settings.validate(); err != nil {
+	if exists, err := c.initialized(ctx); err != nil || exists {
 		return false, err
 	}
 	hash, err := hashPassword(password)
@@ -137,38 +133,13 @@ func (c *Control) bootstrap(username, password string, settings Settings) (bool,
 	if err != nil {
 		return false, err
 	}
-	value, err := json.Marshal(settings)
+	result, err := c.db.ExecContext(ctx, "INSERT INTO account VALUES(1,?,?,?,?) ON CONFLICT(id) DO NOTHING", username, hash, revision, unixNow())
 	if err != nil {
 		return false, err
 	}
-	tx, err := c.db.Begin()
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback()
-	if _, err = tx.Exec("INSERT INTO account VALUES(1,?,?,?,?)", username, hash, revision, unixNow()); err != nil {
-		return false, err
-	}
-	if _, err = tx.Exec("INSERT INTO settings VALUES(1,?)", string(value)); err != nil {
-		return false, err
-	}
-	if generated {
-		file, err := os.OpenFile(filepath.Join(c.dir, "initial-admin.txt"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-		if err != nil {
-			return false, err
-		}
-		_, writeErr := fmt.Fprintf(file, "Username: %s\nPassword: %s\nChange these in Account Settings after signing in.\n", username, password)
-		closeErr := file.Close()
-		if writeErr != nil {
-			return false, writeErr
-		}
-		if closeErr != nil {
-			return false, closeErr
-		}
-	}
-	return true, tx.Commit()
+	n, err := result.RowsAffected()
+	return n == 1, err
 }
-
 func (c *Control) authenticate(ctx context.Context, username, password string) (Account, bool, error) {
 	c.authMu.Lock()
 	defer c.authMu.Unlock()
@@ -215,9 +186,6 @@ func (c *Control) changeAccount(ctx context.Context, revision, current, username
 		return false, err
 	}
 	changed, err := result.RowsAffected()
-	if err == nil && changed > 0 {
-		_ = os.Remove(filepath.Join(c.dir, "initial-admin.txt"))
-	}
 	return changed > 0, err
 }
 
@@ -246,9 +214,6 @@ func (c *Control) resetPassword(ctx context.Context, username, password string) 
 		return err
 	}
 	_, err = c.db.ExecContext(ctx, "UPDATE account SET username=?,password_hash=?,revision=?,updated_at=? WHERE id=1", username, hash, revision, unixNow())
-	if err == nil {
-		_ = os.Remove(filepath.Join(c.dir, "initial-admin.txt"))
-	}
 	return err
 }
 
