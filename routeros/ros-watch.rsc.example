@@ -1,0 +1,23 @@
+# REVIEW BEFORE IMPORT. Replace the documentation address with Debian's LAN IP.
+# This adds logging only, not accept/drop policy. Test against your RouterOS first.
+# Existing logs with other prefixes are not forwarded by the new logging rule.
+:local watchServer "192.0.2.10"
+:local watchPort 5514
+:if ($watchServer = "192.0.2.10") do={ :error "Set watchServer to your Debian LAN IP before importing" }
+:if ([:len [/ip firewall filter find]] = 0) do={ :error "Review rule placement on a router without filter rules" }
+:if ([:len [/system logging action find where name="ROSWatch"]] > 0) do={ :error "ROSWatch already exists; do not import twice" }
+
+/system logging action add name=ROSWatch target=remote remote=$watchServer remote-port=$watchPort remote-log-format=syslog syslog-facility=local6 syslog-severity=info
+/system logging add topics=firewall regex="RW-" action=ROSWatch
+
+# Insert observation rules before current filter rules. Each log action continues
+# evaluation; existing firewall decisions remain in effect. Limits are per rule.
+/ip firewall filter add chain=input in-interface-list=WAN connection-state=new protocol=tcp tcp-flags=syn,!ack action=log log-prefix="RW-INPUT " limit=10/1s,20:packet place-before=0 comment="ROS-WATCH input TCP"
+/ip firewall filter add chain=input in-interface-list=WAN connection-state=new protocol=udp action=log log-prefix="RW-INPUT " limit=10/1s,20:packet place-before=0 comment="ROS-WATCH input UDP"
+/ip firewall filter add chain=forward in-interface-list=WAN connection-state=new connection-nat-state=dstnat protocol=tcp tcp-flags=syn,!ack action=log log-prefix="RW-FWD " limit=10/1s,20:packet place-before=0 comment="ROS-WATCH forward TCP"
+/ip firewall filter add chain=forward in-interface-list=WAN connection-state=new connection-nat-state=dstnat protocol=udp action=log log-prefix="RW-FWD " limit=10/1s,20:packet place-before=0 comment="ROS-WATCH forward UDP"
+
+# Rollback ONLY entries created by this template (run manually):
+# /ip firewall filter remove [find where comment~"^ROS-WATCH "]
+# /system logging remove [find where action="ROSWatch"]
+# /system logging action remove [find where name="ROSWatch"]
