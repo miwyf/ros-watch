@@ -18,6 +18,7 @@ func (c *counters) snapshot() map[string]int64 {
 
 type Collector struct {
 	store                     *Store
+	notifier                  *Notifier
 	settings                  *atomic.Pointer[Settings]
 	counters                  counters
 	started                   float64
@@ -169,6 +170,9 @@ func (c *Collector) writeBatch(ctx context.Context, batch []Event) {
 	c.counters.written.Add(int64(len(batch)))
 	c.lastWritten.Store(time.Now().UnixNano())
 	c.setError("")
+	if c.notifier != nil {
+		c.notifier.observe(batch)
+	}
 }
 
 func (c *Collector) writer(ctx context.Context) {

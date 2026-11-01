@@ -55,6 +55,7 @@ type App struct {
 	control       *Control
 	store         *Store
 	collector     *Collector
+	notifier      *Notifier
 	geo           *GeoLookup
 	templates     *template.Template
 	cookies       *securecookie.SecureCookie
@@ -86,6 +87,13 @@ func newApp(config Config) (*App, error) {
 		return nil, err
 	}
 	a.collector = newCollector(a.store, &a.settings, config.Demo)
+	notifications, err := control.loadNotifications(context.Background())
+	if err != nil {
+		a.close()
+		return nil, err
+	}
+	a.notifier = newNotifier(notifications, a.collector)
+	a.collector.notifier = a.notifier
 	a.templates, err = template.New("").ParseFS(assets, "web/templates/*.html")
 	if err != nil {
 		a.close()
@@ -119,6 +127,9 @@ func newApp(config Config) (*App, error) {
 }
 
 func (a *App) close() {
+	if a.notifier != nil {
+		a.notifier.close()
+	}
 	a.geo.close()
 	if a.store != nil {
 		a.store.close()
@@ -149,6 +160,9 @@ func (a *App) handler() http.Handler {
 	mux.HandleFunc("POST /api/account", a.account)
 	mux.HandleFunc("GET /api/settings", a.runtimeSettings)
 	mux.HandleFunc("POST /api/settings", a.runtimeSettings)
+	mux.HandleFunc("GET /api/notifications", a.notificationSettings)
+	mux.HandleFunc("POST /api/notifications", a.notificationSettings)
+	mux.HandleFunc("POST /api/notifications/test", a.testNotification)
 	mux.HandleFunc("POST /api/routeros-script", a.routerOSScript)
 	mux.HandleFunc("GET /api/summary", a.summary)
 	mux.HandleFunc("GET /api/events", a.events)

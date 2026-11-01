@@ -26,6 +26,7 @@ FROM scratch AS production
 ENV DATA_DIR=/data GOMEMLIMIT=128MiB TMPDIR=/data SQLITE_TMPDIR=/data
 COPY --from=build /out/ros-watch /ros-watch
 COPY --from=build /src/geo /geo
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build --chown=10001:10001 /out/data /data
 USER 10001:10001
 VOLUME ["/data"]

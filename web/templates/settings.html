@@ -151,4 +151,23 @@
       </article>
     </div>
   </div>
+  <form id="notification-form" class="panel settings-form notification-form">
+    <div class="panel-heading"><div><h2>告警通知</h2><p>重要异常推送到群机器人。</p></div><label class="notification-check"><input id="notify-enabled" type="checkbox">启用通知</label></div>
+    <div class="settings-fields">
+      <label>通知平台<select id="notify-platform"><option value="feishu">飞书</option><option value="wecom">企业微信</option><option value="dingtalk">钉钉</option></select></label>
+      <label>Webhook 地址<input id="notify-webhook" type="password" autocomplete="off" maxlength="2048" placeholder="粘贴群机器人 Webhook"><small id="notify-webhook-hint">保存后可测试发送。</small></label>
+      <label id="notify-secret-field">签名密钥<input id="notify-secret" type="password" autocomplete="off" maxlength="512" placeholder="机器人启用加签时填写"><small id="notify-secret-hint">与群机器人的安全设置保持一致。</small></label>
+      <label id="notify-clear-field" class="notification-check hidden"><input id="notify-clear-secret" type="checkbox">清除已保存的签名密钥</label>
+      <div class="full-field notification-options">
+        <label class="notification-check"><input id="notify-login_failures" type="checkbox">连续登录失败</label>
+        <label class="notification-check"><input id="notify-login_success" type="checkbox">非可信来源登录成功</label>
+        <label class="notification-check"><input id="notify-storage" type="checkbox">磁盘、接收与写入异常及恢复</label>
+        <label class="notification-check"><input id="notify-scans" type="checkbox">疑似端口扫描</label>
+      </div>
+      <label id="notify-trusted-field" class="full-field hidden">可信管理来源<textarea id="notify-trusted_admins" rows="2" maxlength="4096" placeholder="正常登录路由器的管理设备 IP 或网段，每行一个"></textarea><small>用于判断登录来源。它与“允许发送日志的设备”分别设置；日志没有明确来源时跳过登录来源判断。</small></label>
+      <p class="field-note full-field">连续失败按同一设备、来源和账号在 5 分钟固定窗口达到 5 次判断；扫描沿用日志规则阈值。同类同来源通知冷却 10 分钟，接收与存储只在异常状态变化时通知。通知在后台发送，默认关闭。</p>
+      <div class="full-field storage-summary"><h3>通知发送状态</h3><dl id="notification-status" class="status-list"></dl><p class="inline-note">这里只显示本次运行的计数与状态。平台接受消息后，请在群内确认收到。</p></div>
+    </div>
+    <div class="settings-actions"><button class="primary" type="submit">保存通知设置</button><button id="notification-test" type="button">测试发送</button><span id="notification-result" role="status"></span></div>
+  </form>
 </section>

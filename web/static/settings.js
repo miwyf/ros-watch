@@ -25,10 +25,12 @@ function postSettings(path, body) {
 }
 window.loadSettings = async function () {
   try {
-    const [runtime, account] = await Promise.all([
+    const [runtime, account, notifications] = await Promise.all([
       api("/api/settings"),
       api("/api/account"),
+      api("/api/notifications"),
     ]);
+    populateNotifications(notifications);
     const s = runtime.settings;
     renderStorage(runtime.storage);
     $("set-allowed_senders").value = s.allowed_senders
@@ -100,3 +102,77 @@ $("account-form").addEventListener("submit", async (e) => {
     button.disabled = false;
   }
 });
+
+let notificationSavedPlatform = "";
+const notificationFlags = ["login_failures", "login_success", "storage", "scans"];
+function notificationVisibility() {
+  const wecom = $("notify-platform").value === "wecom";
+  $("notify-secret-field").classList.toggle("hidden", wecom);
+  if (wecom) $("notify-secret").value = "";
+  $("notify-trusted-field").classList.toggle("hidden", !$("notify-login_success").checked);
+}
+function renderNotificationStatus(state) {
+  const timestamp = value => value ? new Date(value * 1000).toLocaleString() : "暂无";
+  dl("notification-status", [
+    ["平台接受次数", state.sent], ["发送失败次数", state.failed],
+    ["冷却抑制次数", state.suppressed], ["通知队列丢弃", state.dropped],
+    ["通知观察丢弃", state.observed_dropped],
+    ["最近尝试", timestamp(state.last_attempt)], ["最近成功", timestamp(state.last_success)],
+    ["最近发送错误", state.last_error || "无"],
+  ]);
+}
+function populateNotifications(data) {
+  const s = data.settings;
+  notificationSavedPlatform = s.platform;
+  $("notify-enabled").checked = s.enabled;
+  $("notify-platform").value = s.platform;
+  $("notify-webhook").value = "";
+  $("notify-secret").value = "";
+  $("notify-clear-secret").checked = false;
+  $("notify-clear-field").classList.toggle("hidden", !s.secret_set);
+  $("notify-webhook-hint").textContent = s.webhook_set ? "地址已保存，留空保留。更换平台时请重新填写。" : "保存后可测试发送。";
+  $("notify-secret-hint").textContent = s.secret_set ? "密钥已保存，留空保留；需要移除时勾选清除。" : "机器人启用加签时填写。";
+  for (const flag of notificationFlags) $("notify-" + flag).checked = s[flag];
+  $("notify-trusted_admins").value = s.trusted_admins.split(",").filter(Boolean).join("\n");
+  renderNotificationStatus(data.status);
+  notificationVisibility();
+}
+$("notify-platform").addEventListener("change", notificationVisibility);
+$("notify-login_success").addEventListener("change", notificationVisibility);
+$("notification-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const button = event.submitter;
+  button.disabled = true;
+  try {
+    const body = {
+      enabled: $("notify-enabled").checked, platform: $("notify-platform").value,
+      webhook: $("notify-webhook").value.trim(), secret: $("notify-secret").value.trim(),
+      clear_secret: $("notify-clear-secret").checked, trusted_admins: $("notify-trusted_admins").value,
+    };
+    for (const flag of notificationFlags) body[flag] = $("notify-" + flag).checked;
+    const result = await postSettings("/api/notifications", body);
+    populateNotifications(await api("/api/notifications"));
+    settingsMessage("notification-result", result.message);
+  } catch (error) {
+    settingsMessage("notification-result", error.message, true);
+  } finally { button.disabled = false; }
+});
+$("notification-test").addEventListener("click", async () => {
+  const button = $("notification-test");
+  button.disabled = true;
+  try {
+    if ($("notify-platform").value !== notificationSavedPlatform || $("notify-webhook").value || $("notify-secret").value || $("notify-clear-secret").checked)
+      throw Error("请先保存通知设置，再测试发送");
+    const result = await postSettings("/api/notifications/test", {});
+    settingsMessage("notification-result", result.message);
+  } catch (error) {
+    settingsMessage("notification-result", error.message, true);
+  } finally {
+    button.disabled = false;
+    try { renderNotificationStatus((await api("/api/notifications")).status); } catch (_) {}
+  }
+});
+setInterval(async () => {
+  if (document.hidden || $("settings-view").classList.contains("hidden")) return;
+  try { renderNotificationStatus((await api("/api/notifications")).status); } catch (_) {}
+}, 30000);
