@@ -1,0 +1,40 @@
+name: Clean old container images
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep_digest:
+        description: Verified current image index digest (sha256:...)
+        required: true
+        type: string
+      apply:
+        description: Delete old versions (false only previews the plan)
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: cleanup-container-images
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.repository == 'miwyf/ros-watch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Keep current image and its referenced manifests
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP_DIGEST: ${{ inputs.keep_digest }}
+          APPLY: ${{ inputs.apply }}
+        run: |
+          if [ "$APPLY" = true ]; then
+            python3 scripts/cleanup_images.py --expected-digest "$KEEP_DIGEST" --apply
+          else
+            python3 scripts/cleanup_images.py --expected-digest "$KEEP_DIGEST"
+          fi

@@ -1236,7 +1236,6 @@ body.loading #refresh {
 .settings-tabs button[aria-selected="true"] { color:var(--accent); border-color:var(--accent); background:#192a23; }
 .settings-tabs button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .settings-panel { min-width:0; }
-#settings-panel-account { max-width:720px; }
 .storage-summary summary { cursor:pointer; font-size:13px; font-weight:600; }
 .storage-summary summary span { margin-left:10px; color:var(--muted); font-size:11px; font-weight:400; overflow-wrap:anywhere; }
 .storage-summary[open] summary { margin-bottom:10px; }
