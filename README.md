@@ -16,7 +16,45 @@ docker compose up -d
 docker compose ps
 ```
 
-默认使用发布版本镜像，无需在服务器安装 Go 或编译。1Panel 在“容器 → 编排”粘贴本项目 `compose.yaml` 即可部署，无需上传源码或 Dockerfile。网页端口为 8086，日志端口为 UDP 5514。
+默认使用发布版本镜像，无需在服务器安装 Go 或编译。网页端口为 8086，日志端口为 UDP 5514。
+
+## 1Panel 编排部署
+
+进入 **容器 → 编排 → 创建编排**，选择直接输入 Compose 内容（不同版本界面名称可能略有差异），名称填写 `ros-watch`，粘贴下面完整配置后部署。无需上传源码或 Dockerfile，也不需要填写环境变量。
+
+```yaml
+services:
+  ros-watch:
+    image: ghcr.io/miwyf/ros-watch:0.6.1
+    restart: unless-stopped
+    init: true
+    ports:
+      - "8086:8080"
+      - "5514:5514/udp"
+    volumes:
+      - ros-watch-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 192m
+    cpus: 0.50
+    pids_limit: 64
+    stop_grace_period: 15s
+    logging:
+      driver: local
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+volumes:
+  ros-watch-data:
+```
+
+部署成功后访问 `http://<1Panel服务器内网地址>:8086` 创建管理员。若端口已占用，只修改 `ports` 冒号左侧的宿主机端口；修改日志端口后，RouterOS 接入时也填写修改后的端口。数据保存在 `ros-watch-data` 命名卷中，升级时保持编排名称和数据卷不变，不要选择删除数据卷。
+
 
 ## Docker 命令部署
 
