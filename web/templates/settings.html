@@ -1,6 +1,12 @@
 <section id="settings-view" class="view hidden">
-  <div class="settings-grid">
-    <form id="runtime-form" class="panel settings-form">
+  <div class="settings-tabs" role="tablist" aria-label="系统设置分区">
+    <button id="settings-tab-logs" type="button" role="tab" data-settings-tab="logs" aria-controls="settings-panel-logs" aria-selected="true" tabindex="0">日志与观察规则</button>
+    <button id="settings-tab-account" type="button" role="tab" data-settings-tab="account" aria-controls="settings-panel-account" aria-selected="false" tabindex="-1">账号安全</button>
+    <button id="settings-tab-notifications" type="button" role="tab" data-settings-tab="notifications" aria-controls="settings-panel-notifications" aria-selected="false" tabindex="-1">告警通知</button>
+    <button id="settings-tab-routeros" type="button" role="tab" data-settings-tab="routeros" aria-controls="settings-panel-routeros" aria-selected="false" tabindex="-1">RouterOS 接入</button>
+  </div>
+  <section id="settings-panel-logs" role="tabpanel" aria-labelledby="settings-tab-logs" class="settings-panel">
+<form id="runtime-form" class="panel settings-form">
       <div class="panel-heading">
         <div>
           <h2>日志与观察规则</h2>
@@ -36,11 +42,11 @@
         /></label>
         <label>最低可用磁盘空间（MB）<input id="set-min_free_mb" type="number" min="0" max="1048576" required><small>低于此值时执行下面选择的处理方式。</small></label>
         <label>磁盘不足时处理方式<select id="set-disk_low_action"><option value="prune">自动清理最旧日志（默认）</option><option value="pause">暂停写入，保留现有日志</option></select></label>
-        <div class="full-field storage-summary">
-          <h3>日志存储状态</h3>
+        <details class="full-field storage-summary">
+          <summary>日志存储状态 <span id="settings-storage-summary"></span></summary>
           <dl id="settings-storage" class="status-list"></dl>
-          <p id="settings-storage-notice" class="inline-note">正在读取空间状态…</p>
-        </div>
+        </details>
+        <p id="settings-storage-notice" class="inline-note full-field">正在读取空间状态…</p>
         <p class="field-note full-field">原始日志和访问记录均按保留天数清理。实际可查时间取决于已接收到的日志；不再按条数或数据库预算清理；磁盘不足时，自动清理模式可能提前删除保留期内的最旧记录，并显示清理情况。</p>
         <label
           >接收处理上限（条/秒）<input
@@ -89,8 +95,9 @@
         ><span id="runtime-result" role="status"></span>
       </div>
     </form>
-    <div>
-      <form id="account-form" class="panel settings-form">
+  </section>
+  <section id="settings-panel-account" role="tabpanel" aria-labelledby="settings-tab-account" class="settings-panel hidden">
+<form id="account-form" class="panel settings-form">
         <div class="panel-heading">
           <div>
             <h2>账号安全</h2>
@@ -139,7 +146,7 @@
           ><span id="account-result" role="status"></span>
         </div>
       </form>
-      <article class="panel settings-help">
+<article class="panel settings-help">
         <h2>账号与设置保留在哪里？</h2>
         <p>
           账号、密码哈希和采集设置保存在持久数据卷中。后台修改后无需再改环境变量。
@@ -149,9 +156,9 @@
         </p>
         <p>访问端口由 Docker Compose 管理；本机地址无需在后台重复填写。</p>
       </article>
-    </div>
-  </div>
-  <form id="notification-form" class="panel settings-form notification-form">
+  </section>
+  <section id="settings-panel-notifications" role="tabpanel" aria-labelledby="settings-tab-notifications" class="settings-panel hidden">
+<form id="notification-form" class="panel settings-form">
     <div class="panel-heading"><div><h2>告警通知</h2><p>重要异常推送到群机器人。</p></div><label class="notification-check"><input id="notify-enabled" type="checkbox">启用通知</label></div>
     <div class="settings-fields">
       <label>通知平台<select id="notify-platform"><option value="feishu">飞书</option><option value="wecom">企业微信</option><option value="dingtalk">钉钉</option></select></label>
@@ -166,8 +173,12 @@
       </div>
       <label id="notify-trusted-field" class="full-field hidden">可信管理来源<textarea id="notify-trusted_admins" rows="2" maxlength="4096" placeholder="正常登录路由器的管理设备 IP 或网段，每行一个"></textarea><small>用于判断登录来源。它与“允许发送日志的设备”分别设置；日志没有明确来源时跳过登录来源判断。</small></label>
       <p class="field-note full-field">连续失败按同一设备、来源和账号在 5 分钟固定窗口达到 5 次判断；扫描沿用日志规则阈值。同类同来源通知冷却 10 分钟，接收与存储只在异常状态变化时通知。通知在后台发送，默认关闭。</p>
-      <div class="full-field storage-summary"><h3>通知发送状态</h3><dl id="notification-status" class="status-list"></dl><p class="inline-note">这里只显示本次运行的计数与状态。平台接受消息后，请在群内确认收到。</p></div>
+      <details class="full-field storage-summary"><summary>通知发送状态 <span id="notification-status-summary"></span></summary><dl id="notification-status" class="status-list"></dl><p class="inline-note">这里只显示本次运行的计数与状态。平台接受消息后，请在群内确认收到。</p></details>
     </div>
     <div class="settings-actions"><button class="primary" type="submit">保存通知设置</button><button id="notification-test" type="button">测试发送</button><span id="notification-result" role="status"></span></div>
   </form>
+  </section>
+  <section id="settings-panel-routeros" role="tabpanel" aria-labelledby="settings-tab-routeros" class="settings-panel hidden">
+{{template "routeros.html" .}}
+  </section>
 </section>

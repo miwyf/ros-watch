@@ -2,7 +2,7 @@
   <div class="panel-heading"><div><h2 id="routeros-title">RouterOS 接入指令</h2><p>在 WinBox 的 New Terminal 中手动执行，网页不会连接或修改路由器。</p></div><span class="tag">手动接入</span></div>
   <div class="routeros-body">
     <ol class="routeros-steps">
-      <li>先到<button class="text-button routeros-settings-link" type="button" data-view="settings">系统设置 → 允许发送日志的设备</button>，保存路由器实际发送日志的内网地址。</li>
+      <li>先到<button class="text-button routeros-settings-link" type="button" data-view="settings/logs">日志与观察规则 → 允许发送日志的设备</button>，保存路由器实际发送日志的内网地址。</li>
       <li>填写 ROS 能访问的日志服务器 IPv4 地址和 Docker 对外映射的 UDP 端口，生成并复制接入指令。</li>
       <li>确认 ROS 已有名为 WAN 的接口列表及防火墙规则，再粘贴到终端执行；接口列表名称不同需先修改脚本。</li>
       <li>执行后到“接收状态”查看有效记录。四条日志规则分别限制 10 条/秒、突发 20 条，看板统计为采样结果。</li>

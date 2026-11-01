@@ -23,7 +23,11 @@ function postSettings(path, body) {
     body: JSON.stringify(body),
   });
 }
+let settingsLoaded = false;
+let settingsLoading = false;
 window.loadSettings = async function () {
+  if (settingsLoaded || settingsLoading) return;
+  settingsLoading = true;
   try {
     const [runtime, account, notifications] = await Promise.all([
       api("/api/settings"),
@@ -44,9 +48,10 @@ window.loadSettings = async function () {
     $("set-sampling").value = s.sampling;
     $("set-disk_low_action").value = s.disk_low_action;
     $("account-username").value = account.username;
+    settingsLoaded = true;
   } catch (e) {
     settingsMessage("runtime-result", e.message, true);
-  }
+  } finally { settingsLoading = false; }
 };
 $("runtime-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -112,6 +117,8 @@ function notificationVisibility() {
   $("notify-trusted-field").classList.toggle("hidden", !$("notify-login_success").checked);
 }
 function renderNotificationStatus(state) {
+  $("notification-status-summary").textContent = state.last_error ? "最近发送失败：" + state.last_error : state.last_success ? "最近成功：" + date(state.last_success) : "尚未发送";
+  $("notification-status-summary").classList.toggle("error", Boolean(state.last_error));
   const timestamp = value => value ? new Date(value * 1000).toLocaleString() : "暂无";
   dl("notification-status", [
     ["平台接受次数", state.sent], ["发送失败次数", state.failed],

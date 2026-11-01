@@ -23,7 +23,9 @@ let view = "overview",
   loading = false,
   pending = false;
 const filterNames = ["hours", "wan", "scope", "proto", "outcome"];
-const viewNames = ["overview", "events", "logs", "system", "routeros", "settings"];
+const viewNames = ["overview", "events", "logs", "system", "settings"];
+const settingsTabNames = ["logs", "account", "notifications", "routeros"];
+let settingsTab = "logs";
 function params(search = false) {
   const p = new URLSearchParams();
   for (const k of filterNames) if ($(k).value) p.set(k, $(k).value);
@@ -49,9 +51,14 @@ function fail(message) {
   $("connection-text").textContent = "刷新失败";
 }
 function showView(name) {
+  let requestedTab = null;
+  if (name === "routeros") { name = "settings"; requestedTab = "routeros"; }
+  else if (name.startsWith("settings/")) { requestedTab = name.slice(9); name = "settings"; }
+  if (name === "settings" && requestedTab !== null)
+    settingsTab = settingsTabNames.includes(requestedTab) ? requestedTab : "logs";
   if (!viewNames.includes(name)) name = "overview";
   view = name;
-  const fragment = name === "overview" ? "" : "#" + name;
+  const fragment = name === "overview" ? "" : name === "settings" && settingsTab !== "logs" ? "#settings/" + settingsTab : "#" + name;
   if (window.location.hash !== fragment)
     window.history.replaceState(null, "", window.location.pathname + window.location.search + fragment);
   window.scrollTo({ top: 0, behavior: "instant" });
@@ -60,7 +67,6 @@ function showView(name) {
     events: "访问记录",
     logs: "系统日志",
     system: "接收状态",
-    routeros: "RouterOS 接入",
     settings: "系统设置",
   };
   $("page-title").replaceChildren(
@@ -70,8 +76,6 @@ function showView(name) {
   document.querySelector(".subtitle").textContent =
     name === "logs"
       ? "查看登录、配置变更、网络状态与系统事件。"
-      : name === "routeros"
-      ? "生成和复制接入指令，在 ROS 终端手动执行。"
       : name === "settings"
       ? "参数保存后生效，重建容器后依然保留。"
       : "从连接尝试中发现变化，掌握你的网络边界。";
@@ -85,21 +89,43 @@ function showView(name) {
     events: "访问记录",
     logs: "系统日志",
     system: "接收状态",
-    routeros: "RouterOS 接入",
     settings: "系统设置",
   }[name];
   document
     .querySelector(".filterbar")
-    .classList.toggle("hidden", name === "settings" || name === "routeros" || name === "logs");
-  $("refresh").classList.toggle("hidden", name === "settings" || name === "routeros");
-  $("notice").classList.toggle("hidden", name === "routeros");
-  document.title = name === "routeros" ? "RouterOS 接入 · ROS Watch" : "ROS Watch · 网络观察台";
-  if (name === "settings") window.loadSettings?.();
+    .classList.toggle("hidden", name === "settings" || name === "logs");
+  $("refresh").classList.toggle("hidden", name === "settings");
+  $("notice").classList.toggle("hidden", name === "settings");
+  document.title = name === "settings" ? "系统设置 · ROS Watch" : "ROS Watch · 网络观察台";
+  if (name === "settings") {
+    for (const tab of settingsTabNames) {
+      const selected = tab === settingsTab;
+      const button = $("settings-tab-" + tab);
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+      $("settings-panel-" + tab).classList.toggle("hidden", !selected);
+    }
+    window.loadSettings?.();
+  }
   if (name === "logs") refreshLogs(true);
   if (name === "events") {
     cursor = null;
     refreshEvents().catch((e) => fail(e.message));
   }
+}
+for (const button of document.querySelectorAll("[data-settings-tab]")) {
+  button.addEventListener("click", () => showView("settings/" + button.dataset.settingsTab));
+  button.addEventListener("keydown", event => {
+    let index = settingsTabNames.indexOf(button.dataset.settingsTab);
+    if (event.key === "ArrowRight") index = (index + 1) % settingsTabNames.length;
+    else if (event.key === "ArrowLeft") index = (index + settingsTabNames.length - 1) % settingsTabNames.length;
+    else if (event.key === "Home") index = 0;
+    else if (event.key === "End") index = settingsTabNames.length - 1;
+    else return;
+    event.preventDefault();
+    showView("settings/" + settingsTabNames[index]);
+    $("settings-tab-" + settingsTabNames[index]).focus();
+  });
 }
 function drill(field, value) {
   $(field === "src" ? "dport" : "src").value = "";
@@ -351,6 +377,7 @@ function renderStorage(s) {
     ["空间不足累计清理", format(s.space_pruned) + " 条"],
     ["最近空间清理", date(s.last_space_cleanup)],
   ]);
+  $("settings-storage-summary").textContent = "已用 " + byteSize(s.database_bytes) + " · 可用 " + byteSize(s.disk_free_bytes);
   $("settings-storage-notice").textContent = storageMessage(s) + (s.space_pruned ? " 曾因空间不足提前清理 " + format(s.space_pruned) + " 条；实际可查范围以上述时间为准。" : "");
   $("settings-storage-notice").classList.toggle("error", s.space_state !== "normal");
 }
@@ -580,7 +607,7 @@ $("first-page").addEventListener("click", () => {
 });
 window.addEventListener("DOMContentLoaded", () => {
   const initialView = window.location.hash.slice(1);
-  if (viewNames.includes(initialView)) showView(initialView);
+  if (initialView) showView(initialView);
 });
 window.addEventListener("hashchange", () => showView(window.location.hash.slice(1)));
 refresh();
