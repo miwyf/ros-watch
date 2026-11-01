@@ -9,14 +9,15 @@
 公开镜像：`ghcr.io/miwyf/ros-watch:latest`，支持 Linux amd64 / arm64。服务器安装 Docker 和 Compose 插件后执行：
 
 ```sh
-git clone https://github.com/miwyf/ros-watch.git
+mkdir -p ros-watch
 cd ros-watch
+curl -fsSLo compose.yaml https://raw.githubusercontent.com/miwyf/ros-watch/main/compose.yaml
 docker compose pull
 docker compose up -d
 docker compose ps
 ```
 
-默认使用 `latest`，跟随 main 上通过测试的最新构建，无需在服务器安装 Go 或编译。已有容器不会自行升级，更新时需要拉取镜像并重建容器。需要固定版本或回退时，可将标签换成 `0.6.1` 等已发布版本。网页端口为 8086，日志端口为 UDP 5514。
+只下载 Compose 配置文件，不需要 Git 或项目源码。默认使用 `latest`，跟随 main 上通过测试的最新构建，无需在服务器安装 Go 或编译。已有容器不会自行升级，更新时需要拉取镜像并重建容器。需要固定版本或回退时，可将标签换成 `0.6.1` 等已发布版本。网页端口为 8086，日志端口为 UDP 5514。
 
 ## 1Panel 编排部署
 
