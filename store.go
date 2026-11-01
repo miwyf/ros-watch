@@ -49,6 +49,10 @@ func openStore(dir string, settings *atomic.Pointer[Settings]) (*Store, error) {
 		writer.Close()
 		return nil, err
 	}
+	if _, err = writer.Exec(logSchema); err != nil {
+		writer.Close()
+		return nil, err
+	}
 	reader, err := sql.Open("sqlite", sqliteDSN(path, "mode=ro&_pragma=busy_timeout(3000)&_pragma=query_only(1)"))
 	if err != nil {
 		writer.Close()
@@ -89,7 +93,21 @@ func (s *Store) append(ctx context.Context, events []Event) error {
 		return err
 	}
 	defer statement.Close()
+	logs, err := tx.PrepareContext(ctx, "INSERT INTO logs ("+logColumns+") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+	if err != nil {
+		return err
+	}
+	defer logs.Close()
 	for _, e := range events {
+		if e.Log != nil {
+			l := e.Log
+			if _, err = logs.ExecContext(ctx, l.TS, l.Sender, l.Device, l.DeviceTime, l.Category, l.Severity, l.Username, l.Source, l.Method, l.Event, l.Message, l.Raw, l.Topic); err != nil {
+				return err
+			}
+		}
+		if e.Scope == "" {
+			continue
+		}
 		if _, err = statement.ExecContext(ctx, e.TS, e.Sender, e.Src, e.Sport, e.Dst, e.Dport, e.Proto, e.Flags, e.WAN, e.Interface, e.Scope, e.Outcome, e.Raw); err != nil {
 			return err
 		}
@@ -106,16 +124,19 @@ func (s *Store) maintenance(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, "DELETE FROM events WHERE ts < ?", unixNow()-float64(settings.RetentionDays*86400))
+	var removed int64
+	for _, table := range []string{"events", "logs"} {
+		result, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE ts < ?", unixNow()-float64(settings.RetentionDays*86400))
+		if err != nil {
+			return err
+		}
+		n, _ := result.RowsAffected()
+		removed += n
+	}
+	n, err := pruneLogRows(ctx, tx, int64(settings.MaxRows))
 	if err != nil {
 		return err
 	}
-	removed, _ := result.RowsAffected()
-	result, err = tx.ExecContext(ctx, "DELETE FROM events WHERE id <= (SELECT id FROM events ORDER BY id DESC LIMIT 1 OFFSET ?)", settings.MaxRows)
-	if err != nil {
-		return err
-	}
-	n, _ := result.RowsAffected()
 	removed += n
 	var pages, free, size int64
 	for _, item := range []struct {
@@ -128,11 +149,14 @@ func (s *Store) maintenance(ctx context.Context) error {
 	}
 	target := int64(settings.MaxDBMB) * 1024 * 1024 / size
 	if float64(pages-free) > float64(target)*.8 {
-		result, err = tx.ExecContext(ctx, "DELETE FROM events WHERE id <= (SELECT id FROM events ORDER BY id LIMIT 1 OFFSET (SELECT COUNT(*) / 5 FROM events))")
+		var count int64
+		if err = tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM events)+(SELECT COUNT(*) FROM logs)").Scan(&count); err != nil {
+			return err
+		}
+		n, err = pruneLogRows(ctx, tx, count*4/5)
 		if err != nil {
 			return err
 		}
-		n, _ = result.RowsAffected()
 		removed += n
 	}
 	if err = tx.Commit(); err != nil {

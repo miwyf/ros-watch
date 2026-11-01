@@ -8,20 +8,21 @@ import (
 )
 
 type Event struct {
-	ID        int64   `json:"id"`
-	TS        float64 `json:"ts"`
-	Sender    string  `json:"sender"`
-	Src       string  `json:"src"`
-	Sport     *int    `json:"sport"`
-	Dst       string  `json:"dst"`
-	Dport     *int    `json:"dport"`
-	Proto     string  `json:"proto"`
-	Flags     string  `json:"flags"`
-	WAN       string  `json:"wan"`
-	Interface string  `json:"interface"`
-	Scope     string  `json:"scope"`
-	Outcome   string  `json:"outcome"`
-	Raw       string  `json:"raw"`
+	Log       *LogEvent `json:"-"`
+	ID        int64     `json:"id"`
+	TS        float64   `json:"ts"`
+	Sender    string    `json:"sender"`
+	Src       string    `json:"src"`
+	Sport     *int      `json:"sport"`
+	Dst       string    `json:"dst"`
+	Dport     *int      `json:"dport"`
+	Proto     string    `json:"proto"`
+	Flags     string    `json:"flags"`
+	WAN       string    `json:"wan"`
+	Interface string    `json:"interface"`
+	Scope     string    `json:"scope"`
+	Outcome   string    `json:"outcome"`
+	Raw       string    `json:"raw"`
 }
 
 var chainPattern = regexp.MustCompile(`(?i)\b(input|forward):\s+in:([^\s]+)\s+out:([^,\s]+)`)

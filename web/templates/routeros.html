@@ -7,7 +7,7 @@
       <li>确认 ROS 已有名为 WAN 的接口列表及防火墙规则，再粘贴到终端执行；接口列表名称不同需先修改脚本。</li>
       <li>执行后到“接收状态”查看有效记录。四条日志规则分别限制 10 条/秒、突发 20 条，看板统计为采样结果。</li>
     </ol>
-    <p class="inline-note">仅增加日志和转发配置，不新增放行、拦截或封禁规则。已接入的路由器无需重复执行；提示 ROSWatch already exists 时，先用下方检查指令确认状态。若只执行成功一部分，可核对后使用撤销指令移除本项目条目，再重新接入。</p>
+    <p class="inline-note">仅增加日志和转发配置，不新增放行、拦截或封禁规则。已接入的路由器使用下方“补充系统日志”指令，沿用已有日志目的地址与端口，不重复增加防火墙规则。系统日志包含登录、基础变更、接口、拨号、脚本及其他常规事件，排除 debug/packet。若只执行成功一部分，可核对后使用撤销指令移除本项目条目，再重新接入。</p>
     <form id="routeros-form" class="routeros-generator">
       <label for="ros-server">日志服务器 IPv4<input id="ros-server" name="server_address" inputmode="decimal" maxlength="64" placeholder="填写 ROS 可访问的服务器内网地址" required autocomplete="off"><small>网页使用域名或反向代理时，此地址不一定是网页地址。</small></label>
       <label for="ros-port">日志 UDP 端口<input id="ros-port" name="syslog_port" type="number" min="1" max="65535" value="5514" required><small>填写 UDP 映射端口，不是网页端口。</small></label>
@@ -16,7 +16,9 @@
     <p id="ros-result" role="status"></p>
     <div class="routeros-code-heading"><h3>接入指令</h3><button class="outline-button" type="button" data-ros-copy="ros-install" disabled>复制接入指令</button></div>
     <textarea id="ros-install" class="routeros-code" rows="14" readonly spellcheck="false" aria-label="RouterOS 接入脚本" placeholder="填写地址并生成后，在这里查看完整脚本"></textarea>
+    <details class="routeros-details" open><summary>已有接入：补充系统日志</summary><p class="inline-note">已有 ROSWatch 转发时执行本段。使用独立 ROSWatchSystem 动作和类别标记；严重级别自动保留。完成后在“系统日志”查看新事件。重复执行不会重复添加，部分规则缺失时会补齐。</p><div class="routeros-copy-row"><button class="outline-button" type="button" data-ros-copy="ros-upgrade" disabled>复制补充系统日志指令</button></div><textarea id="ros-upgrade" class="routeros-code" rows="12" readonly spellcheck="false" aria-label="补充系统日志指令"></textarea></details>
     <details class="routeros-details"><summary>检查接入状态</summary><p class="inline-note">只查看日志转发配置、日志规则计数和本地日志，不修改路由器。</p><div class="routeros-copy-row"><button class="outline-button" type="button" data-ros-copy="ros-check" disabled>复制检查指令</button></div><textarea id="ros-check" class="routeros-code" rows="5" readonly spellcheck="false" aria-label="RouterOS 检查指令"></textarea></details>
-    <details class="routeros-details"><summary>撤销 ROS Watch 新增项</summary><p class="inline-note">执行后停止这些日志的采集。只删除 ROS-WATCH 标记的过滤规则和 ROSWatch 日志动作；不会清空全部防火墙规则。</p><div class="routeros-copy-row"><button class="outline-button" type="button" data-ros-copy="ros-remove" disabled>复制撤销指令</button></div><textarea id="ros-remove" class="routeros-code" rows="6" readonly spellcheck="false" aria-label="RouterOS 撤销指令"></textarea></details>
+    <details class="routeros-details"><summary>撤销 ROS Watch 新增项</summary><p class="inline-note">执行后停止这些日志的采集。只删除 ROS-WATCH 标记的过滤规则和 ROSWatch、ROSWatchSystem 日志动作；不会清空全部防火墙规则。</p><div class="routeros-copy-row"><button class="outline-button" type="button" data-ros-copy="ros-remove" disabled>复制撤销指令</button></div><textarea id="ros-remove" class="routeros-code" rows="6" readonly spellcheck="false" aria-label="RouterOS 撤销指令"></textarea></details>
+    <details class="routeros-details"><summary>仅撤销系统日志补充项</summary><p class="inline-note">保留现有防火墙访问日志采集。</p><div class="routeros-copy-row"><button class="outline-button" type="button" data-ros-copy="ros-remove-system" disabled>复制系统日志撤销指令</button></div><textarea id="ros-remove-system" class="routeros-code" rows="3" readonly spellcheck="false" aria-label="仅撤销系统日志"></textarea></details>
   </div>
 </article>

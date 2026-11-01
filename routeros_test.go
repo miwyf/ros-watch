@@ -28,8 +28,11 @@ func TestRouterOSCommandsUseReviewedTemplate(t *testing.T) {
 	if strings.Contains(commands.Check, "remove") || !strings.Contains(commands.Check, "print stats") {
 		t.Fatal("check commands modify state")
 	}
-	if strings.Count(commands.Remove, "remove [find") != 3 || !strings.Contains(commands.Remove, `comment~"^ROS-WATCH "`) || !strings.Contains(commands.Remove, `name="ROSWatch"`) {
+	if strings.Count(commands.Remove, "remove [find") != 5 || !strings.Contains(commands.Remove, `comment~"^ROS-WATCH "`) || !strings.Contains(commands.Remove, `name="ROSWatch"`) {
 		t.Fatal("removal scope changed")
+	}
+	if !strings.Contains(commands.Upgrade, "ROSWatchSystem") || !strings.Contains(commands.Upgrade, "syslog-severity=auto") || strings.Contains(commands.Upgrade, "/ip firewall") || strings.Count(commands.Upgrade, "/system logging add") != 6 || !strings.Contains(commands.RemoveSystem, `name="ROSWatchSystem"`) {
+		t.Fatal("system log upgrade or rollback missing")
 	}
 }
 func TestRouterOSGeneratorAuthValidationAndNoSettingsMutation(t *testing.T) {

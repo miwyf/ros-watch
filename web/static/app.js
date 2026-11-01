@@ -23,7 +23,7 @@ let view = "overview",
   loading = false,
   pending = false;
 const filterNames = ["hours", "wan", "scope", "proto", "outcome"];
-const viewNames = ["overview", "events", "system", "routeros", "settings"];
+const viewNames = ["overview", "events", "logs", "system", "routeros", "settings"];
 function params(search = false) {
   const p = new URLSearchParams();
   for (const k of filterNames) if ($(k).value) p.set(k, $(k).value);
@@ -58,6 +58,7 @@ function showView(name) {
   const titles = {
     overview: "外部访问，一目了然",
     events: "访问记录",
+    logs: "系统日志",
     system: "接收状态",
     routeros: "RouterOS 接入",
     settings: "系统设置",
@@ -67,7 +68,9 @@ function showView(name) {
     node("span", ".", "accent"),
   );
   document.querySelector(".subtitle").textContent =
-    name === "routeros"
+    name === "logs"
+      ? "查看登录、配置变更、网络状态与系统事件。"
+      : name === "routeros"
       ? "生成和复制接入指令，在 ROS 终端手动执行。"
       : name === "settings"
       ? "参数保存后生效，重建容器后依然保留。"
@@ -80,17 +83,19 @@ function showView(name) {
   $("view-title").textContent = {
     overview: "访问概览",
     events: "访问记录",
+    logs: "系统日志",
     system: "接收状态",
     routeros: "RouterOS 接入",
     settings: "系统设置",
   }[name];
   document
     .querySelector(".filterbar")
-    .classList.toggle("hidden", name === "settings" || name === "routeros");
+    .classList.toggle("hidden", name === "settings" || name === "routeros" || name === "logs");
   $("refresh").classList.toggle("hidden", name === "settings" || name === "routeros");
   $("notice").classList.toggle("hidden", name === "routeros");
   document.title = name === "routeros" ? "RouterOS 接入 · ROS Watch" : "ROS Watch · 网络观察台";
   if (name === "settings") window.loadSettings?.();
+  if (name === "logs") refreshLogs(true);
   if (name === "events") {
     cursor = null;
     refreshEvents().catch((e) => fail(e.message));
@@ -471,6 +476,7 @@ async function refresh() {
   loading = true;
   document.body.classList.add("loading");
   try {
+    if (view === "logs") { if (!logCursor) await refreshLogs(); return; }
     const r = await api("/api/summary?" + params());
     $("error-banner").classList.add("hidden");
     $("metric-total").textContent = format(r.totals.observations);
@@ -509,6 +515,7 @@ for (const id of filterNames)
     if (view === "events") refreshEvents().catch((e) => fail(e.message));
   });
 $("refresh").addEventListener("click", () => {
+  if (view === "logs") { refreshLogs(true); return; }
   if (view === "events") cursor = null;
   refresh();
 });

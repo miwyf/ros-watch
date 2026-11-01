@@ -35,7 +35,7 @@
             required
         /></label>
         <label
-          >最多保留记录数<input
+          >最多保留记录数（合计）<input
             id="set-max_rows"
             type="number"
             min="1"
@@ -59,7 +59,7 @@
             required
         /></label>
         <p class="field-note full-field">
-          降低保留期限、记录数或容量预算后，后台会清理旧记录。预算不等于整个数据卷的硬配额。
+          原始日志与访问记录共用合计行数、保留期限和容量预算。降低限制后后台会清理旧记录。预算不等于整个数据卷的硬配额。
         </p>
         <label
           >接收处理上限（条/秒）<input

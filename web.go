@@ -27,7 +27,7 @@ import (
 	"github.com/gorilla/securecookie"
 )
 
-//go:embed web/templates/*.html web/static/* routeros/ros-watch.rsc.example
+//go:embed web/templates/*.html web/static/* routeros/*.example
 var assets embed.FS
 
 const cookieName = "ros_watch_session"
@@ -153,6 +153,8 @@ func (a *App) handler() http.Handler {
 	mux.HandleFunc("GET /api/summary", a.summary)
 	mux.HandleFunc("GET /api/events", a.events)
 	mux.HandleFunc("GET /api/export", a.export)
+	mux.HandleFunc("GET /api/logs", a.logs)
+	mux.HandleFunc("GET /api/logs/export", a.exportLogs)
 	static, _ := fs.Sub(assets, "web/static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

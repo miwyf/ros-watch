@@ -9,9 +9,11 @@ import (
 )
 
 type RouterOSCommands struct {
-	Install string `json:"install"`
-	Check   string `json:"check"`
-	Remove  string `json:"remove"`
+	Install      string `json:"install"`
+	Upgrade      string `json:"upgrade"`
+	Check        string `json:"check"`
+	Remove       string `json:"remove"`
+	RemoveSystem string `json:"remove_system"`
 }
 
 func buildRouterOSCommands(server string, port int) (RouterOSCommands, error) {
@@ -33,15 +35,24 @@ func buildRouterOSCommands(server string, port int) (RouterOSCommands, error) {
 	}
 	install = strings.Replace(install, `:local watchServer "192.0.2.10"`, `:local watchServer "`+address.String()+`"`, 1)
 	install = strings.Replace(install, ":local watchPort 5514", ":local watchPort "+strconv.Itoa(port), 1)
-	result.Install = strings.TrimSpace(install)
+	upgrade, err := assets.ReadFile("routeros/ros-watch-system.rsc.example")
+	if err != nil {
+		return result, errors.New("系统日志指令暂不可用")
+	}
+	result.Upgrade = strings.TrimSpace(string(upgrade))
+	result.Install = strings.TrimSpace(install) + "\n\n" + result.Upgrade
 	result.Check = `/system logging action print detail where name="ROSWatch"
+/system logging action print detail where name="ROSWatchSystem"
 /system logging print detail where action="ROSWatch"
+/system logging print detail where action="ROSWatchSystem"
 /ip firewall filter print stats where comment~"^ROS-WATCH "
-/log print where message~"RW-"`
+/log print where message~"RW-|login failure|logged in|logged out"`
+	result.RemoveSystem = `/system logging remove [find where action="ROSWatchSystem"]
+/system logging action remove [find where name="ROSWatchSystem"]`
 	result.Remove = `# 仅移除 ROS Watch 标记的规则及日志转发，执行后停止向看板发送这些日志。
 /ip firewall filter remove [find where comment~"^ROS-WATCH "]
 /system logging remove [find where action="ROSWatch"]
-/system logging action remove [find where name="ROSWatch"]`
+/system logging action remove [find where name="ROSWatch"]` + "\n" + result.RemoveSystem
 	return result, nil
 }
 

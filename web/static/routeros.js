@@ -1,5 +1,5 @@
 "use strict";
-const routerosFields = ["ros-install", "ros-check", "ros-remove"];
+const routerosFields = ["ros-install", "ros-upgrade", "ros-check", "ros-remove", "ros-remove-system"];
 const routerosCopyButtons = [...document.querySelectorAll("[data-ros-copy]")];
 const pageHost = window.location.hostname;
 if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(pageHost) && !pageHost.startsWith("127.") && pageHost !== "0.0.0.0")
@@ -17,10 +17,12 @@ $("routeros-form").addEventListener("submit", async (event) => {
       syslog_port: Number($("ros-port").value),
     });
     $("ros-install").value = result.install;
+    $("ros-upgrade").value = result.upgrade;
+    $("ros-remove-system").value = result.remove_system;
     $("ros-check").value = result.check;
     $("ros-remove").value = result.remove;
     for (const copy of routerosCopyButtons) copy.disabled = false;
-    settingsMessage("ros-result", "已生成，请核对地址和端口后复制到 ROS 终端执行。已接入的路由器不用重复执行。");
+    settingsMessage("ros-result", "已生成。首次接入复制完整指令；已有 ROSWatch 的设备使用补充系统日志指令，它沿用现有日志目的地址和端口。");
   } catch (error) {
     settingsMessage("ros-result", error.message, true);
   } finally {

@@ -84,9 +84,9 @@ func (c *Collector) accept(data []byte, sender netip.Addr) {
 	c.tokens--
 	event := parseMessage(data, sender.String(), settings.WANMap, float64(now.UnixNano())/1e9)
 	if event == nil {
-		c.counters.ignored.Add(1)
-		return
+		event = &Event{}
 	}
+	event.Log = parseSyslog(data, sender.String(), float64(now.UnixNano())/1e9)
 	c.lastReceived.Store(now.UnixNano())
 	c.queueMu.Lock()
 	if c.count >= settings.QueueSize {
