@@ -549,7 +549,7 @@ func (a *App) runtimeSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet {
-		jsonResponse(w, 200, map[string]any{"settings": a.settings.Load()})
+		jsonResponse(w, 200, map[string]any{"settings": a.settings.Load(), "storage": a.store.storageStatus()})
 		return
 	}
 	if !validCSRF(r, s) {

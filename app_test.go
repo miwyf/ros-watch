@@ -32,7 +32,6 @@ func testApp(t *testing.T) *App {
 	}
 	s := defaultSettings()
 	s.AllowedSenders = "127.0.0.1"
-	s.MinFreeMB = 0
 	if _, err = control.createAccount(context.Background(), "admin", "test-account-password"); err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +46,7 @@ func testApp(t *testing.T) *App {
 	if err != nil {
 		t.Fatal(err)
 	}
+	app.store.availableDisk = func(string) (uint64, error) { return 10 * minimumFreeDiskBytes, nil }
 	t.Cleanup(app.close)
 	return app
 }

@@ -223,7 +223,34 @@ func (c *Control) loadSettings(ctx context.Context) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	return decodeSettings([]byte(text))
+	var fields map[string]json.RawMessage
+	if err = json.Unmarshal([]byte(text), &fields); err != nil {
+		return Settings{}, err
+	}
+	migrated := false
+	for _, key := range []string{"max_rows", "max_db_mb"} {
+		if _, ok := fields[key]; ok {
+			delete(fields, key)
+			migrated = true
+		}
+	}
+	if _, ok := fields["min_free_mb"]; !ok {
+		fields["min_free_mb"] = json.RawMessage("1024")
+		migrated = true
+	}
+	if _, ok := fields["disk_low_action"]; !ok {
+		fields["disk_low_action"] = json.RawMessage(`"prune"`)
+		migrated = true
+	}
+	data, err := json.Marshal(fields)
+	if err != nil {
+		return Settings{}, err
+	}
+	s, err := decodeSettings(data)
+	if err == nil && migrated {
+		err = c.saveSettings(ctx, s)
+	}
+	return s, err
 }
 func (c *Control) saveSettings(ctx context.Context, s Settings) error {
 	value, err := json.Marshal(s)

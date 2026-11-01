@@ -74,7 +74,6 @@ func (p *probe) settings() error {
 	}
 	s := r["settings"].(map[string]any)
 	s["allowed_senders"] = "127.0.0.1"
-	s["min_free_mb"] = 0
 	data, _ := json.Marshal(s)
 	request, _ := http.NewRequest("POST", p.base+"/api/settings", strings.NewReader(string(data)))
 	request.Header.Set("Content-Type", "application/json")

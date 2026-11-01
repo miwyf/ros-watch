@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"math"
 	"net/url"
 	"os"
@@ -18,12 +17,18 @@ import (
 const eventColumns = "ts,sender,src,sport,dst,dport,proto,flags,wan,interface,scope,outcome,raw"
 
 type Store struct {
-	writer, reader *sql.DB
-	dir            string
-	pageSize       int64
-	mu             sync.Mutex
-	settings       *atomic.Pointer[Settings]
-	pruned         atomic.Int64
+	writer, reader   *sql.DB
+	dir              string
+	mu               sync.Mutex
+	settings         *atomic.Pointer[Settings]
+	pruned           atomic.Int64
+	availableDisk    func(string) (uint64, error)
+	storageMu        sync.RWMutex
+	storage          storageCoverage
+	spacePruned      atomic.Int64
+	lastSpaceCleanup atomic.Int64
+	lastSpaceAttempt atomic.Int64
+	reclaimSupported bool
 }
 
 func sqliteDSN(path, query string) string {
@@ -53,6 +58,26 @@ func openStore(dir string, settings *atomic.Pointer[Settings]) (*Store, error) {
 		writer.Close()
 		return nil, err
 	}
+	if _, err = writer.Exec(`CREATE TABLE IF NOT EXISTS storage_state(id INTEGER PRIMARY KEY CHECK(id=1),space_pruned INTEGER NOT NULL,last_cleanup REAL NOT NULL); INSERT OR IGNORE INTO storage_state VALUES(1,0,0);`); err != nil {
+		writer.Close()
+		return nil, err
+	}
+	var vacuumMode int
+	if err = writer.QueryRow("PRAGMA auto_vacuum").Scan(&vacuumMode); err != nil {
+		writer.Close()
+		return nil, err
+	}
+	if vacuumMode == 0 {
+		info, statErr := os.Stat(path)
+		free, freeErr := availableDisk(dir)
+		if statErr == nil && freeErr == nil && free > uint64(info.Size())*2+uint64(settings.Load().MinFreeMB)*1024*1024 {
+			if _, err = writer.Exec("PRAGMA auto_vacuum=INCREMENTAL; VACUUM;"); err != nil {
+				writer.Close()
+				return nil, err
+			}
+			vacuumMode = 2
+		}
+	}
 	reader, err := sql.Open("sqlite", sqliteDSN(path, "mode=ro&_pragma=busy_timeout(3000)&_pragma=query_only(1)"))
 	if err != nil {
 		writer.Close()
@@ -60,11 +85,15 @@ func openStore(dir string, settings *atomic.Pointer[Settings]) (*Store, error) {
 	}
 	reader.SetMaxOpenConns(2)
 	reader.SetMaxIdleConns(2)
-	s := &Store{writer: writer, reader: reader, dir: dir, settings: settings}
-	if err = writer.QueryRow("PRAGMA page_size").Scan(&s.pageSize); err != nil {
+	s := &Store{writer: writer, reader: reader, dir: dir, settings: settings, availableDisk: availableDisk, reclaimSupported: vacuumMode != 0}
+	var count int64
+	var last float64
+	if err = writer.QueryRow("SELECT space_pruned,last_cleanup FROM storage_state WHERE id=1").Scan(&count, &last); err != nil {
 		s.close()
 		return nil, err
 	}
+	s.spacePruned.Store(count)
+	s.lastSpaceCleanup.Store(int64(last * 1e9))
 	if err = s.maintenance(context.Background()); err != nil {
 		s.close()
 		return nil, err
@@ -79,10 +108,6 @@ func (s *Store) append(ctx context.Context, events []Event) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.writer.ExecContext(ctx, fmt.Sprintf("PRAGMA max_page_count=%d", int64(s.settings.Load().MaxDBMB)*1024*1024/s.pageSize))
-	if err != nil {
-		return err
-	}
 	tx, err := s.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -112,7 +137,11 @@ func (s *Store) append(ctx context.Context, events []Event) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	s.recordStorageAppend(events)
+	return nil
 }
 
 func (s *Store) maintenance(ctx context.Context) error {
@@ -133,36 +162,20 @@ func (s *Store) maintenance(ctx context.Context) error {
 		n, _ := result.RowsAffected()
 		removed += n
 	}
-	n, err := pruneLogRows(ctx, tx, int64(settings.MaxRows))
-	if err != nil {
+	var coverage storageCoverage
+	if err = tx.QueryRowContext(ctx, `SELECT
+ (SELECT COUNT(*) FROM events)+(SELECT COUNT(*) FROM logs),
+ (SELECT MIN(t) FROM (SELECT MIN(ts) t FROM events UNION ALL SELECT MIN(ts) FROM logs)),
+ (SELECT MAX(t) FROM (SELECT MAX(ts) t FROM events UNION ALL SELECT MAX(ts) FROM logs))`).Scan(&coverage.Records, &coverage.oldest, &coverage.newest); err != nil {
 		return err
-	}
-	removed += n
-	var pages, free, size int64
-	for _, item := range []struct {
-		query string
-		dest  *int64
-	}{{"PRAGMA page_count", &pages}, {"PRAGMA freelist_count", &free}, {"PRAGMA page_size", &size}} {
-		if err = tx.QueryRowContext(ctx, item.query).Scan(item.dest); err != nil {
-			return err
-		}
-	}
-	target := int64(settings.MaxDBMB) * 1024 * 1024 / size
-	if float64(pages-free) > float64(target)*.8 {
-		var count int64
-		if err = tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM events)+(SELECT COUNT(*) FROM logs)").Scan(&count); err != nil {
-			return err
-		}
-		n, err = pruneLogRows(ctx, tx, count*4/5)
-		if err != nil {
-			return err
-		}
-		removed += n
 	}
 	if err = tx.Commit(); err != nil {
 		return err
 	}
 	s.pruned.Add(removed)
+	s.storageMu.Lock()
+	s.storage = coverage
+	s.storageMu.Unlock()
 	for _, q := range []string{"PRAGMA wal_checkpoint(TRUNCATE)", "PRAGMA incremental_vacuum(256)"} {
 		if _, err = s.writer.ExecContext(ctx, q); err != nil {
 			return err
@@ -181,7 +194,7 @@ func (s *Store) diskUsage() int64 {
 	return total
 }
 func (s *Store) diskOK() bool {
-	free, err := availableDisk(s.dir)
+	free, err := s.availableDisk(s.dir)
 	return err == nil && free >= uint64(s.settings.Load().MinFreeMB)*1024*1024
 }
 

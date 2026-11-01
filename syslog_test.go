@@ -51,14 +51,14 @@ func TestGenericLogsUseTrustedCollectorAndLeaveAccessStatisticsSeparate(t *testi
 		t.Fatalf("separation broken: %d events %d logs", events, logs)
 	}
 	s := *a.settings.Load()
-	s.MaxRows = 2
+	s.RetentionDays = 1
 	a.settings.Store(&s)
 	if err := a.store.maintenance(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	a.store.reader.QueryRow("SELECT (SELECT count(*) FROM events)+(SELECT count(*) FROM logs)").Scan(&logs)
-	if logs != 2 {
-		t.Fatal("combined row budget bypassed", logs)
+	if logs != 4 {
+		t.Fatal("unexpired records were removed", logs)
 	}
 }
 

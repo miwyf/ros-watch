@@ -68,7 +68,7 @@ func TestRouterOSGeneratorAuthValidationAndNoSettingsMutation(t *testing.T) {
 	}
 	afterAccount, _ := a.control.account(context.Background())
 	afterSettings := b.settings(t)
-	if beforeAccount != afterAccount || beforeSettings.AllowedSenders != afterSettings.AllowedSenders || beforeSettings.MinFreeMB != afterSettings.MinFreeMB {
+	if beforeAccount != afterAccount || beforeSettings.AllowedSenders != afterSettings.AllowedSenders {
 		t.Fatal("generation changed account or collector settings")
 	}
 	code, page := b.request(t, "GET", "/", nil, false)

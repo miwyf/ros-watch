@@ -156,7 +156,7 @@ func (c *Collector) writeBatch(ctx context.Context, batch []Event) {
 	if len(batch) == 0 {
 		return
 	}
-	if !c.store.diskOK() {
+	if !c.store.ensureDiskSpace(ctx) {
 		c.counters.storageDropped.Add(int64(len(batch)))
 		c.setError("disk_low")
 		return
@@ -218,7 +218,7 @@ func (c *Collector) stop() {
 }
 func (c *Collector) status() map[string]any {
 	s := c.settings.Load()
-	return map[string]any{"counters": c.counters.snapshot(), "started_at": c.started, "last_received": nullableTime(c.lastReceived.Load()), "last_written": nullableTime(c.lastWritten.Load()), "queue": c.queueLength(), "error": c.getError(), "db_bytes": c.store.diskUsage(), "pruned": c.store.pruned.Load(), "sampling": s.Sampling, "demo": c.demo, "scan_ports": s.ScanPorts, "scan_window": s.ScanWindow, "retention_days": s.RetentionDays, "max_db_mb": s.MaxDBMB, "sources_configured": s.AllowedSenders != ""}
+	return map[string]any{"counters": c.counters.snapshot(), "started_at": c.started, "last_received": nullableTime(c.lastReceived.Load()), "last_written": nullableTime(c.lastWritten.Load()), "queue": c.queueLength(), "error": c.getError(), "db_bytes": c.store.diskUsage(), "pruned": c.store.pruned.Load(), "sampling": s.Sampling, "demo": c.demo, "scan_ports": s.ScanPorts, "scan_window": s.ScanWindow, "retention_days": s.RetentionDays, "storage": c.store.storageStatus(), "sources_configured": s.AllowedSenders != ""}
 }
 func nullableTime(nanos int64) any {
 	if nanos == 0 {

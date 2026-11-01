@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 )
 
-const Version = "0.5.0"
+const Version = "0.6.0"
 const MinPasswordLength = 8
 
 type Config struct {
@@ -53,9 +53,8 @@ type Settings struct {
 	AllowedSenders  string            `json:"allowed_senders"`
 	WANMap          map[string]string `json:"wan_map"`
 	RetentionDays   int               `json:"retention_days"`
-	MaxRows         int               `json:"max_rows"`
-	MaxDBMB         int               `json:"max_db_mb"`
 	MinFreeMB       int               `json:"min_free_mb"`
+	DiskLowAction   string            `json:"disk_low_action"`
 	QueueSize       int               `json:"queue_size"`
 	IngestPerSecond int               `json:"ingest_per_second"`
 	ScanPorts       int               `json:"scan_ports"`
@@ -65,7 +64,7 @@ type Settings struct {
 }
 
 func defaultSettings() Settings {
-	return Settings{WANMap: map[string]string{"pppoe-out1": "WAN1", "pppoe-out2": "WAN2"}, RetentionDays: 7, MaxRows: 500000, MaxDBMB: 512, MinFreeMB: 256, QueueSize: 4096, IngestPerSecond: 500, ScanPorts: 15, ScanWindow: 300, Sampling: "unknown"}
+	return Settings{WANMap: map[string]string{"pppoe-out1": "WAN1", "pppoe-out2": "WAN2"}, RetentionDays: 7, MinFreeMB: 1024, DiskLowAction: "prune", QueueSize: 4096, IngestPerSecond: 500, ScanPorts: 15, ScanWindow: 300, Sampling: "unknown"}
 }
 
 var sourceSeparator = regexp.MustCompile(`[,\s]+`)
@@ -117,7 +116,7 @@ func (s *Settings) validate() error {
 		name             string
 		value, low, high int
 	}{
-		{"retention_days", s.RetentionDays, 1, 31}, {"max_rows", s.MaxRows, 1, 2000000}, {"max_db_mb", s.MaxDBMB, 8, 8192}, {"min_free_mb", s.MinFreeMB, 0, 1048576},
+		{"retention_days", s.RetentionDays, 1, 31}, {"min_free_mb", s.MinFreeMB, 0, 1048576},
 		{"queue_size", s.QueueSize, 1, 8192}, {"ingest_per_second", s.IngestPerSecond, 1, 5000}, {"scan_ports", s.ScanPorts, 2, 1000}, {"scan_window", s.ScanWindow, 60, 3600},
 	}
 	for _, limit := range limits {
@@ -127,6 +126,9 @@ func (s *Settings) validate() error {
 	}
 	if s.Sampling != "unknown" && s.Sampling != "limited" && s.Sampling != "full" {
 		return errors.New("采样模式无效")
+	}
+	if s.DiskLowAction != "prune" && s.DiskLowAction != "pause" {
+		return errors.New("磁盘不足处理方式无效")
 	}
 	s.AllowedSenders = strings.Join(values, ",")
 	s.networks = networks
@@ -148,8 +150,16 @@ func validLabel(value string) bool {
 func decodeSettings(data []byte) (Settings, error) {
 	var raw map[string]json.RawMessage
 	var s Settings
-	if err := json.Unmarshal(data, &raw); err != nil || len(raw) != 11 {
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return s, errors.New("请提交完整的运行设置")
+	}
+	for _, key := range []string{"max_rows", "max_db_mb"} {
+		if _, ok := raw[key]; ok {
+			return s, errors.New("日志设置已简化，请刷新页面后重新保存")
+		}
+	}
+	if len(raw) != 10 {
+		return s, errors.New("日志设置已更新，请刷新页面后重新保存完整设置")
 	}
 	for _, value := range raw {
 		if string(value) == "null" {

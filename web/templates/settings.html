@@ -34,33 +34,14 @@
             max="31"
             required
         /></label>
-        <label
-          >最多保留记录数（合计）<input
-            id="set-max_rows"
-            type="number"
-            min="1"
-            max="2000000"
-            required
-        /></label>
-        <label
-          >日志数据库预算（MB）<input
-            id="set-max_db_mb"
-            type="number"
-            min="8"
-            max="8192"
-            required
-        /></label>
-        <label
-          >最低可用磁盘空间（MB）<input
-            id="set-min_free_mb"
-            type="number"
-            min="0"
-            max="1048576"
-            required
-        /></label>
-        <p class="field-note full-field">
-          原始日志与访问记录共用合计行数、保留期限和容量预算。降低限制后后台会清理旧记录。预算不等于整个数据卷的硬配额。
-        </p>
+        <label>最低可用磁盘空间（MB）<input id="set-min_free_mb" type="number" min="0" max="1048576" required><small>低于此值时执行下面选择的处理方式。</small></label>
+        <label>磁盘不足时处理方式<select id="set-disk_low_action"><option value="prune">自动清理最旧日志（默认）</option><option value="pause">暂停写入，保留现有日志</option></select></label>
+        <div class="full-field storage-summary">
+          <h3>日志存储状态</h3>
+          <dl id="settings-storage" class="status-list"></dl>
+          <p id="settings-storage-notice" class="inline-note">正在读取空间状态…</p>
+        </div>
+        <p class="field-note full-field">原始日志和访问记录均按保留天数清理。实际可查时间取决于已接收到的日志；不再按条数或数据库预算清理；磁盘不足时，自动清理模式可能提前删除保留期内的最旧记录，并显示清理情况。</p>
         <label
           >接收处理上限（条/秒）<input
             id="set-ingest_per_second"

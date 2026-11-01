@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 )
 
@@ -11,34 +10,6 @@ const logSchema = `CREATE TABLE IF NOT EXISTS logs(id INTEGER PRIMARY KEY,ts REA
 CREATE INDEX IF NOT EXISTS logs_time ON logs(ts);
 CREATE INDEX IF NOT EXISTS logs_category_time ON logs(category,ts);
 CREATE INDEX IF NOT EXISTS logs_login_source ON logs(source,username,ts) WHERE category='login';`
-
-// Both representations share the existing database and combined row budget.
-func pruneLogRows(ctx context.Context, tx *sql.Tx, limit int64) (int64, error) {
-	var count int64
-	if err := tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM events)+(SELECT COUNT(*) FROM logs)").Scan(&count); err != nil {
-		return 0, err
-	}
-	if count <= limit {
-		return 0, nil
-	}
-	if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE IF NOT EXISTS prune_rows(kind TEXT,id INTEGER); DELETE FROM prune_rows;`); err != nil {
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO prune_rows SELECT kind,id FROM (SELECT 'events' kind,id,ts FROM events UNION ALL SELECT 'logs',id,ts FROM logs) ORDER BY ts,id,kind LIMIT ?`, count-limit); err != nil {
-		return 0, err
-	}
-	var removed int64
-	for _, table := range []string{"events", "logs"} {
-		r, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE id IN (SELECT id FROM prune_rows WHERE kind=?)", table)
-		if err != nil {
-			return 0, err
-		}
-		n, _ := r.RowsAffected()
-		removed += n
-	}
-	_, err := tx.ExecContext(ctx, "DELETE FROM prune_rows")
-	return removed, err
-}
 
 type LogFilters struct {
 	Since, Until float64

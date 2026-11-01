@@ -327,6 +327,33 @@ function dl(id, items) {
     }),
   );
 }
+function storageMessage(s) {
+  if (!s) return "正在读取空间状态…";
+  if (s.space_state === "low_space") return s.disk_low_action === "prune" ? "磁盘空间不足，自动清理仍未恢复到最低可用空间，已暂停写入。请释放其他磁盘空间；暂停期间的新日志可能丢失。" : "磁盘空间不足，已暂停写入。现有日志仍按保留天数管理；腾出空间后自动恢复，暂停期间的新日志可能丢失。";
+  if (s.space_state === "unknown") return "无法读取磁盘可用空间，已暂停写入，请检查存储状态。";
+  return "空间正常。平时按保留天数清理过期日志。";
+}
+function byteSize(n) {
+  if (n === null || n === undefined) return "未知";
+  return n >= 1073741824 ? (n / 1073741824).toFixed(2) + " GB" : (n / 1048576).toFixed(1) + " MB";
+}
+function renderStorage(s) {
+  if (!s) return;
+  dl("settings-storage", [
+    ["数据库已占用", byteSize(s.database_bytes)],
+    ["磁盘可用空间", byteSize(s.disk_free_bytes)],
+    ["空间状态", {normal:"正常",low_space:"不足，暂停写入",unknown:"无法读取，暂停写入"}[s.space_state]],
+    ["当前保留记录", format(s.records)],
+    ["实际最早记录", date(s.oldest)],
+    ["最新记录", date(s.newest)],
+    ["保留期限", s.retention_days + " 天"],
+    ["空间不足时", s.disk_low_action === "prune" ? "自动清理最旧日志" : "暂停写入"],
+    ["空间不足累计清理", format(s.space_pruned) + " 条"],
+    ["最近空间清理", date(s.last_space_cleanup)],
+  ]);
+  $("settings-storage-notice").textContent = storageMessage(s) + (s.space_pruned ? " 曾因空间不足提前清理 " + format(s.space_pruned) + " 条；实际可查范围以上述时间为准。" : "");
+  $("settings-storage-notice").classList.toggle("error", s.space_state !== "normal");
+}
 function status(s, coverage) {
   $("demo-banner").classList.toggle("hidden", !s.demo);
   const c = s.counters;
@@ -350,6 +377,8 @@ function status(s, coverage) {
   if (coverage.oldest)
     text += " 可查记录起始于 " + date(coverage.oldest) + "。";
   if (losses) text += ` 本次运行有 ${format(losses)} 条报文因保护限制未入库。`;
+  if (s.storage.space_pruned) text += " 曾因空间不足提前清理 " + format(s.storage.space_pruned) + " 条，最近 " + date(s.storage.last_space_cleanup) + "。";
+  if (s.storage.space_state !== "normal") text += " " + storageMessage(s.storage);
   if (s.error)
     text +=
       " 接收服务异常：" +
@@ -360,11 +389,13 @@ function status(s, coverage) {
         receiver_failed: "接收器已停止",
       }[s.error] || s.error);
   $("notice").textContent = text;
-  $("notice").classList.toggle("danger", !!s.error || losses > 0);
-  $("connection").classList.toggle("stale", !!s.error);
+  $("notice").classList.toggle("danger", !!s.error || losses > 0 || s.storage.space_state !== "normal");
+  $("connection").classList.toggle("stale", !!s.error || s.storage.space_state !== "normal");
   $("connection-text").textContent = s.demo
     ? "演示数据"
-    : s.error
+    : s.storage.space_state !== "normal"
+      ? "存储空间异常"
+      : s.error
       ? "接收异常"
       : s.last_received && Date.now() / 1000 - s.last_received < 120
         ? "正在接收"
@@ -385,12 +416,14 @@ function status(s, coverage) {
     ["超长报文丢弃", format(c.oversized)],
     ["当前排队", format(s.queue)],
   ]);
+  renderStorage(s.storage);
   dl("storage-status", [
-    ["当前保留记录", format(coverage.stored)],
-    ["最早保留时间", date(coverage.oldest)],
-    ["最新保留时间", date(coverage.newest)],
-    ["数据库及日志文件", (s.db_bytes / 1048576).toFixed(1) + " MB"],
-    ["数据库容量设置", s.max_db_mb + " MB"],
+    ["当前保留记录（原文与访问合计）", format(s.storage.records)],
+    ["实际最早记录", date(s.storage.oldest)],
+    ["最新记录", date(s.storage.newest)],
+    ["数据库已占用", byteSize(s.storage.database_bytes)],
+    ["磁盘可用空间", byteSize(s.storage.disk_free_bytes)],
+    ["空间状态", {normal:"正常",low_space:"不足，暂停写入",unknown:"无法读取"}[s.storage.space_state]],
     ["最长保留", s.retention_days + " 天"],
     ["本次运行已清理", format(s.pruned) + " 条"],
     ["时间依据", "服务器接收时间"],

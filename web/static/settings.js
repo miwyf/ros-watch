@@ -1,8 +1,6 @@
 "use strict";
 const runtimeNumbers = [
   "retention_days",
-  "max_rows",
-  "max_db_mb",
   "min_free_mb",
   "queue_size",
   "ingest_per_second",
@@ -32,6 +30,7 @@ window.loadSettings = async function () {
       api("/api/account"),
     ]);
     const s = runtime.settings;
+    renderStorage(runtime.storage);
     $("set-allowed_senders").value = s.allowed_senders
       .split(",")
       .filter(Boolean)
@@ -41,6 +40,7 @@ window.loadSettings = async function () {
       .join("\n");
     for (const key of runtimeNumbers) $("set-" + key).value = s[key];
     $("set-sampling").value = s.sampling;
+    $("set-disk_low_action").value = s.disk_low_action;
     $("account-username").value = account.username;
   } catch (e) {
     settingsMessage("runtime-result", e.message, true);
@@ -67,6 +67,7 @@ $("runtime-form").addEventListener("submit", async (e) => {
       allowed_senders: $("set-allowed_senders").value,
       wan_map: mapping,
       sampling: $("set-sampling").value,
+      disk_low_action: $("set-disk_low_action").value,
     };
     for (const key of runtimeNumbers) body[key] = Number($("set-" + key).value);
     const result = await postSettings("/api/settings", body);

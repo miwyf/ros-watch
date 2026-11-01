@@ -9,11 +9,9 @@ import (
 	"time"
 )
 
-func TestRetentionBudgetAndAccountIsolation(t *testing.T) {
+func TestRetentionDaysAndAccountIsolation(t *testing.T) {
 	a := testApp(t)
 	s := *a.settings.Load()
-	s.MaxRows = 10
-	s.MaxDBMB = 8
 	a.settings.Store(&s)
 	items := make([]Event, 21)
 	for i := range items {
@@ -28,8 +26,8 @@ func TestRetentionBudgetAndAccountIsolation(t *testing.T) {
 	}
 	f := Filters{Since: unixNow() - 86400, Until: unixNow() + 1, Fields: map[string]any{}}
 	events, err := a.store.events(context.Background(), f, 50, 0)
-	if err != nil || len(events) != 10 || a.store.pruned.Load() != 11 {
-		t.Fatal("retention/row cap failed", len(events), err)
+	if err != nil || len(events) != 20 || a.store.pruned.Load() != 1 {
+		t.Fatal("day-based retention failed", len(events), err)
 	}
 	if _, ok, err := a.control.authenticate(context.Background(), "admin", "test-account-password"); err != nil || !ok {
 		t.Fatal("log cleanup affected account")
@@ -91,7 +89,7 @@ func TestSettingsRejectInvalidAndIgnoreBusinessEnvironment(t *testing.T) {
 	}
 	var values map[string]any
 	json.Unmarshal(data, &values)
-	for _, field := range []string{"scan_ports", "queue_size", "max_db_mb"} {
+	for _, field := range []string{"scan_ports", "queue_size", "retention_days"} {
 		copy := map[string]any{}
 		for k, v := range values {
 			copy[k] = v
@@ -124,8 +122,7 @@ func TestCollectorOversizeRateAndDiskProtection(t *testing.T) {
 	if a.collector.counters.oversized.Load() != 1 || a.collector.counters.rateDropped.Load() != 1 {
 		t.Fatal("receiver protection missing")
 	}
-	s.MinFreeMB = 1048576
-	a.settings.Store(&s)
+	a.store.availableDisk = func(string) (uint64, error) { return minimumFreeDiskBytes - 1, nil }
 	a.collector.writeBatch(context.Background(), a.collector.pop())
 	if a.collector.counters.storageDropped.Load() != 1 || a.collector.getError() != "disk_low" {
 		t.Fatal("low disk not visible")
