@@ -135,6 +135,16 @@ func notificationLabel(value string) string {
 		if r < ' ' || r == 127 {
 			return ' '
 		}
+		switch r {
+		case '<':
+			return '＜'
+		case '>':
+			return '＞'
+		case '@':
+			return '＠'
+		case '&':
+			return '＆'
+		}
 		return r
 	}, value)
 	runes := []rune(value)

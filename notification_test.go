@@ -311,3 +311,13 @@ func TestNotificationTestAPIAndCredentialClear(t *testing.T) {
 		t.Fatal("saved channel did not survive reopening control database")
 	}
 }
+
+func TestNotificationLabelNeutralizesMentions(t *testing.T) {
+	label := notificationLabel("<at user_id=\"all\">@all</at> &lt;at&gt;\n")
+	if strings.ContainsAny(label, "<>@&\r\n") || !strings.Contains(label, "＠all") {
+		t.Fatal("log-controlled account text could trigger bot mentions")
+	}
+	if len([]rune(notificationLabel(strings.Repeat("界", 100)))) != 81 {
+		t.Fatal("notification label length is not bounded")
+	}
+}

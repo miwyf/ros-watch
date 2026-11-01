@@ -2,7 +2,7 @@
 
 单容器 RouterOS 日志与外部访问观察台：来源 / 目标端口排行、访问趋势、疑似扫描、IP 归属地、明细筛选与 CSV 导出。界面适配电脑和手机，静态资源全部本地提供。
 
-版本 **0.7.0**。Go、内嵌网页资源和 SQLite，单个原生程序，无独立数据库或采集器。
+版本 **0.7.1**。Go、内嵌网页资源和 SQLite，单个原生程序，无独立数据库或采集器。
 
 ## Docker Compose 部署（推荐）
 
@@ -229,7 +229,7 @@ docker compose pull && docker compose up -d
 [GitHub Actions](https://github.com/miwyf/ros-watch/actions/workflows/container.yaml) 在推送 `main`、推送 `v*` 标签、提交 PR 或手动运行时执行测试、竞争检测、静态检查及 Compose 校验。测试通过后，main / 版本标签会自动构建并推送 amd64、arm64 镜像到 GHCR，并启动已发布镜像做健康和初始化页面检查；PR 只测试，不发布。
 
 - `main` 发布 `latest` 和 `sha-<完整提交号>`。
-- `v0.7.0` 这类标签发布 `0.7.0` 和对应 SHA 标签，标签版本必须与 `config.go` 一致。
+- `v0.7.1` 这类标签发布 `0.7.1` 和对应 SHA 标签，标签版本必须与 `config.go` 一致。
 - 工作流使用仓库自带 `GITHUB_TOKEN` 发布到 GHCR。首次发布后需在 GitHub 的 Package settings 将镜像包可见性设为 Public，公开仓库本身不会自动公开镜像。
 - 新版本修改 `config.go` 和 README 的版本号，Compose 默认镜像保持 `latest`，推送 main 并确认检查通过，再推送同版本的 `v` 标签。发布标签不应移动或覆盖。
 
