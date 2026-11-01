@@ -65,7 +65,6 @@ volumes:
 
 部署成功后访问 `http://<1Panel服务器内网地址>:8086` 创建管理员。若端口已占用，只修改 `ports` 冒号左侧的宿主机端口；修改日志端口后，RouterOS 接入时也填写修改后的端口。数据保存在 `ros-watch-data` 命名卷中，升级时保持编排名称和数据卷不变，不要选择删除数据卷。
 
-
 ## Docker 命令部署
 
 不使用 Compose 时：
@@ -109,7 +108,7 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --build
 
 默认发布网页 TCP 8086、syslog UDP 5514；需要改端口时修改 `compose.yaml` 的 `ports`。将其部署在可信内网，宿主机防火墙应限制日志来源。
 
-首次访问 `http://<服务器内网地址>:8086`，网页自动进入 **创建管理员** 页面。填写用户名、密码和确认密码，提交后直接进入看板。用户名默认预填 `admin`，可以修改；密码由你设置，8–128 位。
+首次访问 `http://<服务器内网地址>:8086`（直接运行程序时为 8080 端口），网页自动进入 **创建管理员** 页面。填写用户名、密码和确认密码，提交后直接进入看板。用户名默认预填 `admin`，可以修改；密码由你设置，8–128 位。
 
 创建完成后初始化入口关闭，再次访问显示正常登录页。已有账号的部署升级后沿用原账号、密码、设置和日志，不会重新开放初始化。账号创建具备表单 CSRF 校验；并发提交只允许一个管理员创建成功。
 
@@ -121,7 +120,7 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --build
 
 数据库仅存储 Argon2id 密码哈希（独立随机盐，19 MiB / 2 次迭代 / 1 并行度），不保存可取回的明文密码。账号和设置在 `/data/control.sqlite3`，日志在 `/data/events.sqlite3`，会话密钥在 `/data/session.key`，全部位于持久命名卷。改变环境变量不会覆盖后台已保存的账号或参数。
 
-容器以非 root 运行，只读根文件系统，仅 `/data` 可写，默认限制 192 MiB 内存 / 0.5 CPU。不要执行 `docker compose down -v`，它会删除账号、设置和日志所在的数据卷。
+容器以非 root 运行，根文件系统只读，数据持久化到 `/data`，默认限制 192 MiB 内存 / 0.5 CPU。不要执行 `docker compose down -v`，它会删除账号、设置和日志所在的数据卷。
 
 ## 后台可修改的参数
 
@@ -149,10 +148,6 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --build
 容器自身日志继续独立轮转（5 MiB × 2）。原文与解析后的访问记录同时保存，但仅按保留天数管理；旧版本未保存的系统日志无法补回。
 
 部署参数 `DATA_DIR`、`HTTP_HOST/PORT`、`SYSLOG_HOST/PORT`、`COOKIE_SECURE`、`DEMO_MODE` 可按需通过 Compose 覆盖。HTTPS 由反向代理提供时，确认已通过 HTTPS 访问后再设置 `COOKIE_SECURE=true`；HTTP 保持 false。
-
-## 更新已有部署
-
-保留同一命名卷和 Compose 项目名。Go 程序直接读取已有 SQLite 账号、设置和日志，以及标准 Argon2id 密码哈希。更新前备份数据和部署文件，再用新镜像重建容器；账号和后台参数不变；若登录过期，重新登录即可。
 
 ## 忘记密码
 
@@ -199,7 +194,7 @@ UDP 可能丢包，来源白名单只限制发送地址而不构成密码学认�
 - 扫描按 UTC 对齐的固定窗口与同源不同目标端口数判断，可能误报或漏报，仅提示，不自动封禁。
 - 处理限速、队列满、超长、低磁盘及写入失败丢弃可计数；ROS 限速和不可观测的网络/内核 UDP 丢包无法准确计数。界面明确展示采样模式。
 - 运行计数在服务重启后归零，持久化记录仍保留。概览最多约 10 秒缓存；改设置会清理概览缓存。
-- CSV 导出当前筛选最新 10000 条，不含原始全文。
+- 访问记录 CSV 导出当前筛选最新 10000 条；系统日志 CSV 包含原文。
 
 ## IP 归属地
 
@@ -210,6 +205,8 @@ UDP 可能丢包，来源白名单只限制发送地址而不构成密码学认�
 归属地仅表示数据库记录的网络出口地区，可能过时或有误，不代表访问者实际物理位置或身份。内网、共享地址和文档地址单独标记。数据版本、来源、SHA256、许可和更新方法见 [geo/SOURCE.md](geo/SOURCE.md)。
 
 ## 更新与备份
+
+更新前备份数据和部署配置，升级时保持同一 Compose 项目名和数据卷，以沿用账号、设置与日志。
 
 默认 `latest` 的部署执行以下命令更新镜像并重建容器，数据卷保留：
 
@@ -226,26 +223,10 @@ docker compose pull && docker compose up -d
 - `main` 发布 `latest` 和 `sha-<完整提交号>`。
 - `v0.6.1` 这类标签发布 `0.6.1` 和对应 SHA 标签，标签版本必须与 `config.go` 一致。
 - 工作流使用仓库自带 `GITHUB_TOKEN` 发布到 GHCR。首次发布后需在 GitHub 的 Package settings 将镜像包可见性设为 Public，公开仓库本身不会自动公开镜像。
-- 新版本修改 `config.go`、README 和 Compose 的版本号，推送 main 并确认检查通过，再推送同版本的 `v` 标签。发布标签不应移动或覆盖。
+- 新版本修改 `config.go` 和 README 的版本号，Compose 默认镜像保持 `latest`，推送 main 并确认检查通过，再推送同版本的 `v` 标签。发布标签不应移动或覆盖。
 
-## 开发验证
-
-Go 1.27.3+：
-
-```sh
-go test -count=1 ./...
-go vet ./...
-go build -o ros-watch .
-docker build --target test -t ros-watch-tests .
-```
-
-Docker 测试阶段还运行竞争检测；测试工具不进入生产镜像。使用项目外的临时数据目录运行 `ros-watch`；首次打开网页创建管理员，账号库仅保存密码哈希。设置 `DEMO_MODE=true` 和 `HTTP_HOST=127.0.0.1` 可生成文档地址演示数据（必须绑定回环），不要把演示库接入生产。
-
-`go run ./cmd/probe` 提供 1–60 秒的有限合成 UDP/HTTP 验证，仅用于隔离测试实例。该工具要求全新、未初始化的隔离实例，自行创建测试账号并把日志白名单改为回环地址；不可对生产服务运行。Linux 下可采样进程 RSS 和单核 CPU 使用率；CPU 采样按 Linux USER_HZ=100 换算。
+本地测试、容器测试和隔离探针用法见 [开发与测试](docs/development.md)。
 
 ## 官方资料
 
 - [RouterOS 日志](https://manual.mikrotik.com/docs/diagnostics-monitoring-and-troubleshooting/log/)
-- [Go net/http](https://pkg.go.dev/net/http)
-- [OWASP 密码存储](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
-- [Docker 环境变量与 Secrets](https://docs.docker.com/compose/how-tos/environment-variables/best-practices/)
