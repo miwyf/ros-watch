@@ -6,7 +6,7 @@
 
 ## Docker Compose 部署（推荐）
 
-公开镜像：`ghcr.io/miwyf/ros-watch:0.6.1`，支持 Linux amd64 / arm64。服务器安装 Docker 和 Compose 插件后执行：
+公开镜像：`ghcr.io/miwyf/ros-watch:latest`，支持 Linux amd64 / arm64。服务器安装 Docker 和 Compose 插件后执行：
 
 ```sh
 git clone https://github.com/miwyf/ros-watch.git
@@ -16,7 +16,7 @@ docker compose up -d
 docker compose ps
 ```
 
-默认使用发布版本镜像，无需在服务器安装 Go 或编译。网页端口为 8086，日志端口为 UDP 5514。
+默认使用 `latest`，跟随 main 上通过测试的最新构建，无需在服务器安装 Go 或编译。已有容器不会自行升级，更新时需要拉取镜像并重建容器。需要固定版本或回退时，可将标签换成 `0.6.1` 等已发布版本。网页端口为 8086，日志端口为 UDP 5514。
 
 ## 1Panel 编排部署
 
@@ -25,7 +25,7 @@ docker compose ps
 ```yaml
 services:
   ros-watch:
-    image: ghcr.io/miwyf/ros-watch:0.6.1
+    image: ghcr.io/miwyf/ros-watch:latest
     restart: unless-stopped
     init: true
     ports:
@@ -67,7 +67,7 @@ docker run -d --name ros-watch --restart unless-stopped --init \
   -v ros-watch-data:/data --read-only --cap-drop ALL \
   --security-opt no-new-privileges:true --memory 192m --cpus 0.5 --pids-limit 64 \
   --log-driver local --log-opt max-size=5m --log-opt max-file=2 \
-  ghcr.io/miwyf/ros-watch:0.6.1
+  ghcr.io/miwyf/ros-watch:latest
 docker inspect --format '{{.State.Health.Status}}' ros-watch
 ```
 
@@ -203,7 +203,13 @@ UDP 可能丢包，来源白名单只限制发送地址而不构成密码学认�
 
 ## 更新与备份
 
-更新源码并核对 `compose.yaml` 中的版本后执行 `docker compose pull && docker compose up -d`。需要跟随 main 最新构建时，可将镜像标签改为 `latest`；固定版本便于控制升级。备份包含完整持久卷中的账号库、日志库、会话密钥及需要的部署配置。可停服务后备份卷；运行时请使用 SQLite 备份 API 导出一致性副本，不要只复制正在写入的单个日志库而忽略 WAL。含密码哈希、日志地址和会话密钥的备份也应按私人数据保护。
+默认 `latest` 的部署执行以下命令更新镜像并重建容器，数据卷保留：
+
+```sh
+docker compose pull && docker compose up -d
+```
+
+1Panel 在编排中拉取最新镜像后重新部署。固定版本的部署需先修改镜像标签；从源码本地构建的部署沿用前述两个 Compose 文件和 `--build` 命令。备份包含完整持久卷中的账号库、日志库、会话密钥及需要的部署配置。可停服务后备份卷；运行时请使用 SQLite 备份 API 导出一致性副本，不要只复制正在写入的单个日志库而忽略 WAL。含密码哈希、日志地址和会话密钥的备份也应按私人数据保护。
 
 ## GitHub 自动构建镜像
 
