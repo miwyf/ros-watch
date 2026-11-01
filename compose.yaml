@@ -1,7 +1,6 @@
 services:
   ros-watch:
-    build: .
-    image: ros-watch:0.6.0
+    image: ghcr.io/miwyf/ros-watch:0.6.1
     restart: unless-stopped
     init: true
     ports:

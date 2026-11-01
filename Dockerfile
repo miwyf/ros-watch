@@ -1,4 +1,6 @@
-FROM golang:1.27.3-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS build
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -7,8 +9,8 @@ COPY web ./web
 COPY cmd ./cmd
 COPY geo ./geo
 COPY routeros ./routeros
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/ros-watch . \
-    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/probe ./cmd/probe \
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/ros-watch . \
+    && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/probe ./cmd/probe \
     && mkdir -p /out/data && chown 10001:10001 /out/data
 
 FROM build AS test

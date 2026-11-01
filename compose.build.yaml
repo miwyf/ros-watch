@@ -1,0 +1,7 @@
+services:
+  ros-watch:
+    image: ros-watch:local
+    build:
+      context: .
+      target: production
+    pull_policy: build

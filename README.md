@@ -2,15 +2,62 @@
 
 单容器 RouterOS 日志与外部访问观察台：来源 / 目标端口排行、访问趋势、疑似扫描、IP 归属地、明细筛选与 CSV 导出。界面适配电脑和手机，静态资源全部本地提供。
 
-版本 **0.6.0**。Go、内嵌网页资源和 SQLite，单个原生程序，无独立数据库或采集器。
+版本 **0.6.1**。Go、内嵌网页资源和 SQLite，单个原生程序，无独立数据库或采集器。
 
-## Docker / 1Panel 部署
+## Docker Compose 部署（推荐）
 
-在项目目录直接运行：
+公开镜像：`ghcr.io/miwyf/ros-watch:0.6.1`，支持 Linux amd64 / arm64。服务器安装 Docker 和 Compose 插件后执行：
 
 ```sh
-docker compose up -d --build
+git clone https://github.com/miwyf/ros-watch.git
+cd ros-watch
+docker compose pull
+docker compose up -d
+docker compose ps
 ```
+
+默认使用发布版本镜像，无需在服务器安装 Go 或编译。1Panel 在“容器 → 编排”粘贴本项目 `compose.yaml` 即可部署，无需上传源码或 Dockerfile。网页端口为 8086，日志端口为 UDP 5514。
+
+## Docker 命令部署
+
+不使用 Compose 时：
+
+```sh
+docker volume create ros-watch-data
+docker run -d --name ros-watch --restart unless-stopped --init \
+  -p 8086:8080 -p 5514:5514/udp \
+  -v ros-watch-data:/data --read-only --cap-drop ALL \
+  --security-opt no-new-privileges:true --memory 192m --cpus 0.5 --pids-limit 64 \
+  --log-driver local --log-opt max-size=5m --log-opt max-file=2 \
+  ghcr.io/miwyf/ros-watch:0.6.1
+docker inspect --format '{{.State.Health.Status}}' ros-watch
+```
+
+命名卷保存账号、设置和日志，删除或重建容器时保留它。Docker 命令方式与 Compose 默认生成的卷名不同，迁移已有部署时必须使用原来的数据卷。
+
+## 从源码编译部署
+
+需要 Go **1.27.3 或更新版本**。以下命令用于 Linux；默认网页端口为 8080：
+
+```sh
+git clone https://github.com/miwyf/ros-watch.git
+cd ros-watch
+go mod download
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o ros-watch .
+./ros-watch
+```
+
+保持程序运行，在浏览器访问 `http://<服务器内网地址>:8080`。程序默认在当前目录的 `data/` 保存数据库；长期运行可交给 systemd 等服务管理器，服务工作目录设为项目目录，使用普通用户且保证数据目录可写。迁移编译产物时同时复制 `geo/` 到工作目录；网页和 RouterOS 模板已嵌入程序。无需 Python、Node.js 或单独数据库服务。
+
+也可用 Docker 本地编译，沿用相同端口、数据卷和资源限制：
+
+```sh
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
+```
+
+仅构建镜像时使用 `docker build --target production -t ros-watch:local .`。通过本地构建部署后，更新也使用上述两个 Compose 文件。
+
+## 首次使用
 
 **无需填写 .env、本机 IP、长期密码或采集参数。** 默认发布网页 TCP 8086、syslog UDP 5514；需要改端口时修改 `compose.yaml` 的 `ports`。容器监听自己的所有接口，由 Docker 负责宿主机映射。将其部署在可信内网，宿主机防火墙应限制日志来源；无需为日志端口新增 WAN 映射。
 
@@ -25,8 +72,6 @@ docker compose up -d --build
 3. 设置保留天数、队列、接收限速、扫描阈值及 ROS 采样情况，保存后生效。白名单未配置时拒绝所有日志来源。
 
 数据库仅存储 Argon2id 密码哈希（独立随机盐，19 MiB / 2 次迭代 / 1 并行度），不保存可取回的明文密码。账号和设置在 `/data/control.sqlite3`，日志在 `/data/events.sqlite3`，会话密钥在 `/data/session.key`，全部位于持久命名卷。改变环境变量不会覆盖后台已保存的账号或参数。
-
-1Panel：在“容器 → 编排”使用本项目 `compose.yaml`，保留 Dockerfile、go.mod、go.sum、根目录 Go 源码、cmd/、web/ 和 geo/。镜像 `ros-watch:0.6.0` 为本地构建，未发布公共仓库。也可直接用 Compose 部署后在 1Panel 容器页管理。
 
 容器以非 root 运行，只读根文件系统，仅 `/data` 可写，默认限制 192 MiB 内存 / 0.5 CPU。不要执行 `docker compose down -v`，它会删除账号、设置和日志所在的数据卷。
 
@@ -120,11 +165,20 @@ UDP 可能丢包，来源白名单只限制发送地址而不构成密码学认�
 
 ## 更新与备份
 
-更新源码后执行 `docker compose up -d --build`。备份包含完整持久卷中的账号库、日志库、会话密钥及需要的部署配置。可停服务后备份卷；运行时请使用 SQLite 备份 API 导出一致性副本，不要只复制正在写入的单个日志库而忽略 WAL。含密码哈希、日志地址和初始凭据的备份也应按私人数据保护。
+更新源码并核对 `compose.yaml` 中的版本后执行 `docker compose pull && docker compose up -d`。需要跟随 main 最新构建时，可将镜像标签改为 `latest`；固定版本便于控制升级。备份包含完整持久卷中的账号库、日志库、会话密钥及需要的部署配置。可停服务后备份卷；运行时请使用 SQLite 备份 API 导出一致性副本，不要只复制正在写入的单个日志库而忽略 WAL。含密码哈希、日志地址和会话密钥的备份也应按私人数据保护。
+
+## GitHub 自动构建镜像
+
+[GitHub Actions](https://github.com/miwyf/ros-watch/actions/workflows/container.yaml) 在推送 `main`、推送 `v*` 标签、提交 PR 或手动运行时执行测试、竞争检测、静态检查及 Compose 校验。测试通过后，main / 版本标签会自动构建并推送 amd64、arm64 镜像到 GHCR，并启动已发布镜像做健康和初始化页面检查；PR 只测试，不发布。
+
+- `main` 发布 `latest` 和 `sha-<完整提交号>`。
+- `v0.6.1` 这类标签发布 `0.6.1` 和对应 SHA 标签，标签版本必须与 `config.go` 一致。
+- 工作流使用仓库自带 `GITHUB_TOKEN`，无需添加 Docker Hub 密码或个人令牌。首次发布后需在 GitHub 的 Package settings 将镜像包可见性设为 Public，公开仓库本身不会自动公开镜像。
+- 新版本修改 `config.go`、README 和 Compose 的版本号，推送 main 并确认检查通过，再推送同版本的 `v` 标签。发布标签不应移动或覆盖。
 
 ## 开发验证
 
-Go 1.27+：
+Go 1.27.3+：
 
 ```sh
 go test -count=1 ./...
@@ -133,7 +187,7 @@ go build -o ros-watch .
 docker build --target test -t ros-watch-tests .
 ```
 
-Docker 测试阶段还运行竞争检测；测试工具不进入生产镜像。使用项目外的临时数据目录运行 `ros-watch`；首次凭据保存在该目录。设置 `DEMO_MODE=true` 和 `HTTP_HOST=127.0.0.1` 可生成文档地址演示数据（必须绑定回环），不要把演示库接入生产。
+Docker 测试阶段还运行竞争检测；测试工具不进入生产镜像。使用项目外的临时数据目录运行 `ros-watch`；首次打开网页创建管理员，账号库仅保存密码哈希。设置 `DEMO_MODE=true` 和 `HTTP_HOST=127.0.0.1` 可生成文档地址演示数据（必须绑定回环），不要把演示库接入生产。
 
 `go run ./cmd/probe` 提供 1–60 秒的有限合成 UDP/HTTP 验证，仅用于隔离测试实例。该工具要求全新、未初始化的隔离实例，自行创建测试账号并把日志白名单改为回环地址；不可对生产服务运行。Linux 下可采样进程 RSS 和单核 CPU 使用率；CPU 采样按 Linux USER_HZ=100 换算。
 
