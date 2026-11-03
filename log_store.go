@@ -8,7 +8,9 @@ import (
 const logColumns = "ts,sender,device,device_time,category,severity,username,source,method,event,message,raw,topic"
 const logSchema = `CREATE TABLE IF NOT EXISTS logs(id INTEGER PRIMARY KEY,ts REAL NOT NULL,sender TEXT NOT NULL,device TEXT NOT NULL,device_time TEXT NOT NULL,category TEXT NOT NULL,severity TEXT NOT NULL,username TEXT NOT NULL,source TEXT NOT NULL,method TEXT NOT NULL,event TEXT NOT NULL,message TEXT NOT NULL,raw TEXT NOT NULL,topic TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS logs_time ON logs(ts);
+CREATE INDEX IF NOT EXISTS logs_time_summary ON logs(ts,event,category,severity);
 CREATE INDEX IF NOT EXISTS logs_category_time ON logs(category,ts);
+CREATE INDEX IF NOT EXISTS logs_category_id ON logs(category,id);
 CREATE INDEX IF NOT EXISTS logs_login_source ON logs(source,username,ts) WHERE category='login';`
 
 type LogFilters struct {
@@ -38,8 +40,23 @@ func (s *Store) logs(ctx context.Context, f LogFilters, limit int, before int64)
 		where += " AND id<?"
 		args = append(args, before)
 	}
+	from := "logs"
+	// The unfiltered newest page can walk row IDs backwards and stop at LIMIT.
+	// A time-index range scan instead sorts every matching log before returning it.
+	if len(f.Fields) == 0 && f.Search == "" {
+		var exists bool
+		if err := s.reader.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM logs WHERE "+where+")", args...).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if !exists {
+			return []LogEvent{}, nil
+		}
+		from += " NOT INDEXED"
+	} else if f.Fields["category"] != "" && f.Search == "" {
+		from += " INDEXED BY logs_category_id"
+	}
 	args = append(args, limit)
-	rows, err := s.reader.QueryContext(ctx, "SELECT id,"+logColumns+" FROM logs WHERE "+where+" ORDER BY id DESC LIMIT ?", args...)
+	rows, err := s.reader.QueryContext(ctx, "SELECT id,"+logColumns+" FROM "+from+" WHERE "+where+" ORDER BY id DESC LIMIT ?", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +82,11 @@ func (s *Store) logSummary(ctx context.Context, f LogFilters) (map[string]any, e
 	if err != nil {
 		return nil, err
 	}
-	coverage, err := queryMaps(ctx, s.reader, "SELECT MIN(ts) oldest,MAX(ts) newest,COUNT(*) stored,COALESCE(SUM(category<>'firewall'),0) system_logs FROM logs")
+	coverage, err := queryMaps(ctx, s.reader, `SELECT
+ (SELECT MIN(ts) FROM logs) oldest,
+ (SELECT MAX(ts) FROM logs) newest,
+ (SELECT COUNT(*) FROM logs) stored,
+ (SELECT COUNT(*) FROM logs)-(SELECT COUNT(*) FROM logs WHERE category='firewall') system_logs`)
 	if err != nil {
 		return nil, err
 	}

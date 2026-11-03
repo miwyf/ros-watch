@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 )
 
-const Version = "0.7.3"
+const Version = "0.7.4"
 const MinPasswordLength = 8
 
 type Config struct {
