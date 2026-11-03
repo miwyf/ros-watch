@@ -556,16 +556,6 @@ tbody tr:hover {
 .scan-item:last-child {
   border: 0;
 }
-.scan-icon {
-  display: grid;
-  place-items: center;
-  background: #392f24;
-  color: var(--amber);
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  flex-shrink: 0;
-}
 .scan-info {
   flex: 1;
   min-width: 0;
@@ -575,9 +565,33 @@ tbody tr:hover {
   color: var(--muted);
   margin-top: 3px;
 }
-.scan-item > span:last-child {
+.scan-actions > span {
   color: var(--amber);
   font-size: 11px;
+}
+.scan-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
+.scan-block-button { padding: 4px 0; color: var(--accent); font-size: 11px; }
+.scan-source-select, .scan-toolbar input { width: 16px; height: 16px; min-height: 16px; padding: 0; flex-shrink: 0; accent-color: var(--accent); }
+.scan-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0 22px 12px; border-bottom: 1px solid var(--border); }
+.scan-toolbar label { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+.scan-toolbar button { font-size: 11px; padding: 7px 9px; }
+.scan-toolbar > .text-button { margin-left: auto; color: var(--accent); }
+.blocklist-dialog { margin: auto; width: min(780px, calc(100% - 24px)); max-height: calc(100dvh - 32px); overflow-y: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--text); padding: 22px; }
+.blocklist-dialog::backdrop { background: rgba(0, 0, 0, .65); }
+.blocklist-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.blocklist-heading h2 { font-size: 18px; }
+.blocklist-note, .blocklist-result { margin: 12px 0; font-size: 12px; color: var(--muted); line-height: 1.8; }
+.blocklist-result { color: var(--accent); }
+.blocklist-result.danger { color: var(--amber); }
+.blocklist-targets { font: 12px/1.8 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+.blocklist-settings { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin-top: 20px; padding: 16px; border: 1px solid var(--border); border-radius: 8px; }
+.blocklist-settings h3 { font-size: 13px; }
+.blocklist-settings p { font-size: 12px; color: var(--muted); line-height: 1.8; margin-top: 6px; }
+@media (max-width: 480px) {
+  .scan-toolbar { padding: 0 16px 12px; }
+  .scan-item { gap: 8px; }
+  .blocklist-dialog { padding: 16px; }
+  .blocklist-dialog .routeros-code-heading { flex-wrap: wrap; }
 }
 .tag {
   display: inline-block;

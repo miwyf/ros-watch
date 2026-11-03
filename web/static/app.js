@@ -322,6 +322,7 @@ function rankSources(rows, locations = {}) {
 }
 function scans(rows, locations = {}) {
   const box = $("scan-list");
+  updateScanSelection(rows);
   if (!rows.length) {
     empty(box, "当前范围未识别到符合阈值的扫描行为");
     return;
@@ -335,10 +336,12 @@ function scans(rows, locations = {}) {
       locationNode(locations[r.src]),
       node("p", `峰值窗口涉及 ${r.ports} 个端口 · 最后 ${clock(r.last)}`),
     );
+    const actions = node("div", undefined, "scan-actions");
+    actions.append(node("span", format(r.n) + " 条"), scanSourceBlockButton(r.src));
     wrap.append(
-      node("span", "↗", "scan-icon"),
+      scanSourceCheckbox(r.src),
       info,
-      node("span", format(r.n) + " 条"),
+      actions,
     );
     box.append(wrap);
   }

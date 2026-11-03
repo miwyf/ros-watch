@@ -14,6 +14,7 @@
       <button class="primary" type="submit">生成接入指令</button>
     </form>
     <p id="ros-result" role="status"></p>
+    <div class="blocklist-settings"><div><h3>来源 IP 黑名单</h3><p>使用 blocked-sources 统一管理。在扫描列表复制封禁命令，首次使用先配置 RAW 规则。</p></div><button class="outline-button" type="button" data-blocklist-open>黑名单配置与检查</button></div>
     <div class="routeros-code-heading"><h3>接入指令</h3><button class="outline-button" type="button" data-ros-copy="ros-install" disabled>复制接入指令</button></div>
     <textarea id="ros-install" class="routeros-code" rows="14" readonly spellcheck="false" aria-label="RouterOS 接入脚本" placeholder="填写地址并生成后，在这里查看完整脚本"></textarea>
     <details class="routeros-details" open><summary>已有接入：补充系统日志</summary><p class="inline-note">已有 ROSWatch 转发时执行本段。使用独立 ROSWatchSystem 动作和类别标记；严重级别自动保留。完成后在“系统日志”查看新事件。重复执行不会重复添加，部分规则缺失时会补齐。</p><div class="routeros-copy-row"><button class="outline-button" type="button" data-ros-copy="ros-upgrade" disabled>复制补充系统日志指令</button></div><textarea id="ros-upgrade" class="routeros-code" rows="12" readonly spellcheck="false" aria-label="补充系统日志指令"></textarea></details>

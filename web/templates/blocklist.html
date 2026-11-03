@@ -1,0 +1,14 @@
+<dialog id="blocklist-dialog" class="blocklist-dialog" aria-labelledby="blocklist-title" aria-describedby="blocklist-note">
+  <div class="blocklist-heading"><h2 id="blocklist-title">来源黑名单配置</h2><button id="blocklist-close" class="outline-button" type="button" autofocus>关闭</button></div>
+  <p id="blocklist-note" class="blocklist-note">使用 <code>blocked-sources</code> 管理 IPv4 来源。首次使用先执行下方“首次配置”，以后只需添加 IP。复制的命令须在 RouterOS 终端手动执行才会生效。</p>
+  <p id="blocklist-result" class="blocklist-result" role="status" aria-live="polite"></p>
+  <div id="blocklist-address-commands" class="hidden">
+    <p id="blocklist-targets" class="blocklist-targets"></p>
+    <div class="routeros-code-heading"><h3>添加到黑名单</h3><button class="outline-button" type="button" data-blocklist-copy="blocklist-block">复制封禁命令</button></div>
+    <textarea id="blocklist-block" class="routeros-code" rows="5" readonly spellcheck="false" aria-label="来源 IP 封禁命令"></textarea>
+    <p class="blocklist-note">新增项永久保留，重复执行不会重复添加。名单内已有项保留原有的启用状态和有效期；可用下方检查指令核对。</p>
+    <details id="blocklist-unblock-details" class="routeros-details"><summary>解除这些 IP 的封禁</summary><p class="blocklist-note">只从 blocked-sources 删除上述 IP，不改动其他名单或防火墙规则。</p><div class="routeros-copy-row"><button class="outline-button" type="button" data-blocklist-copy="blocklist-unblock">复制解封命令</button></div><textarea id="blocklist-unblock" class="routeros-code" rows="4" readonly spellcheck="false" aria-label="来源 IP 解封命令"></textarea></details>
+  </div>
+  <details id="blocklist-setup-details" class="routeros-details"><summary>首次配置：创建统一封禁规则</summary><p class="blocklist-note">将一条 RAW 丢弃规则放到最前面，以后只需添加 IP。可以重复执行，也适用于 RAW 为空的路由器。名单无需单独创建，添加第一个 IP 时就会出现。</p><p class="blocklist-note">名单内来源的流量会被丢弃，包括你主动访问这些 IP 时收到的响应。提前拦截后，该来源通常不再出现在后面的扫描日志里，可查看 RAW 命中计数。</p><div class="routeros-copy-row"><button class="outline-button" type="button" data-blocklist-copy="blocklist-setup">复制首次配置指令</button></div><textarea id="blocklist-setup" class="routeros-code" rows="12" readonly spellcheck="false" aria-label="黑名单首次配置指令"></textarea></details>
+  <details id="blocklist-check-details" class="routeros-details"><summary>查看名单与拦截计数</summary><p class="blocklist-note">PACKETS 增长表示这条规则正在拦截名单中的来源；计数为整个名单的合计。</p><div class="routeros-copy-row"><button class="outline-button" type="button" data-blocklist-copy="blocklist-check">复制检查指令</button></div><textarea id="blocklist-check" class="routeros-code" rows="3" readonly spellcheck="false" aria-label="黑名单检查指令"></textarea></details>
+</dialog>
