@@ -10,10 +10,28 @@ import (
 
 type RouterOSCommands struct {
 	Install      string `json:"install"`
+	Repair       string `json:"repair"`
 	Upgrade      string `json:"upgrade"`
 	Check        string `json:"check"`
 	Remove       string `json:"remove"`
 	RemoveSystem string `json:"remove_system"`
+}
+
+func routerOSTemplateBody(path string) (string, error) {
+	data, err := assets.ReadFile(path)
+	if err != nil {
+		return "", errors.New("接入指令暂不可用")
+	}
+	text, _, _ := strings.Cut(string(data), "# Rollback ONLY")
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "{") || !strings.HasSuffix(text, "}") {
+		return "", errors.New("接入指令模板无效")
+	}
+	return strings.TrimSpace(text[1 : len(text)-1]), nil
+}
+
+func routerOSTerminalBlock(body, completion string) string {
+	return "{\n" + strings.TrimSpace(body) + "\n:put \"" + completion + "\"\n}"
 }
 
 func buildRouterOSCommands(server string, port int) (RouterOSCommands, error) {
@@ -25,22 +43,25 @@ func buildRouterOSCommands(server string, port int) (RouterOSCommands, error) {
 	if port < 1 || port > 65535 {
 		return result, errors.New("UDP 端口须为 1–65535")
 	}
-	data, err := assets.ReadFile("routeros/ros-watch.rsc.example")
+	install, err := routerOSTemplateBody("routeros/ros-watch.rsc.example")
 	if err != nil {
 		return result, errors.New("接入指令暂不可用")
 	}
-	install, _, found := strings.Cut(string(data), "# Rollback ONLY")
-	if !found {
-		return result, errors.New("接入指令模板无效")
-	}
-	install = strings.Replace(install, `:local watchServer "192.0.2.10"`, `:local watchServer "`+address.String()+`"`, 1)
-	install = strings.Replace(install, ":local watchPort 5514", ":local watchPort "+strconv.Itoa(port), 1)
-	upgrade, err := assets.ReadFile("routeros/ros-watch-system.rsc.example")
+	upgrade, err := routerOSTemplateBody("routeros/ros-watch-system.rsc.example")
 	if err != nil {
 		return result, errors.New("系统日志指令暂不可用")
 	}
-	result.Upgrade = strings.TrimSpace(string(upgrade))
-	result.Install = strings.TrimSpace(install) + "\n\n" + result.Upgrade
+	repair, err := routerOSTemplateBody("routeros/ros-watch-repair.rsc.example")
+	if err != nil {
+		return result, err
+	}
+	renderTarget := func(body string) string {
+		body = strings.Replace(body, `:local watchServer "192.0.2.10"`, `:local watchServer "`+address.String()+`"`, 1)
+		return strings.Replace(body, ":local watchPort 5514", ":local watchPort "+strconv.Itoa(port), 1)
+	}
+	result.Upgrade = routerOSTerminalBlock(upgrade, "ROS Watch system logs ready")
+	result.Install = routerOSTerminalBlock(renderTarget(install)+"\n\n"+upgrade, "ROS Watch installation completed")
+	result.Repair = routerOSTerminalBlock(renderTarget(repair)+"\n\n"+upgrade, "ROS Watch log forwarding repair completed")
 	result.Check = `/system logging action print detail where name="ROSWatch"
 /system logging action print detail where name="ROSWatchSystem"
 /system logging print detail where action="ROSWatch"

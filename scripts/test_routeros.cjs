@@ -11,7 +11,7 @@ function page() {
     classList: { toggle() {} },
     addEventListener(event, handler) { this.handlers[event] = handler; },
   };
-  const buttons = ["ros-wan-check", "ros-wan-example", "ros-install", "ros-upgrade", "ros-check", "ros-remove", "ros-remove-system"].map(id => ({
+  const buttons = ["ros-wan-check", "ros-wan-example", "ros-install", "ros-repair", "ros-upgrade", "ros-check", "ros-remove", "ros-remove-system"].map(id => ({
     dataset: { rosCopy: id }, disabled: true,
     addEventListener(event, handler) { this.handler = handler; },
   }));
@@ -38,6 +38,31 @@ test("WAN commands use every interface on the left and ignore display names", ()
   assert(commands.add.indexOf('name="pppoe-out2"') < commands.add.indexOf("/interface list add"));
   assert(commands.add.startsWith("{\n") && commands.add.endsWith("\n}"));
   assert.doesNotMatch(commands.add, /pppoe-client|\/ip firewall|\/ip route/);
+});
+
+test("repair generation, copy and failure handling keep WAN commands independent", async () => {
+  const { context, element, buttons, copied } = page();
+  element("set-wan_map").value = "ether1=WAN";
+  element("set-wan_map").handlers.input();
+  const scripts = { install: "install block", repair: "repair block", upgrade: "upgrade block", check: "check", remove: "remove", remove_system: "remove system" };
+  let complete;
+  context.postSettings = () => new Promise(resolve => { complete = resolve; });
+  const submission = element("routeros-form").handlers.submit({ preventDefault() {}, submitter: {} });
+  const repairButton = buttons.find(button => button.dataset.rosCopy === "ros-repair");
+  const wanButtons = buttons.filter(button => button.dataset.rosCopy.startsWith("ros-wan-"));
+  assert(repairButton.disabled);
+  assert(wanButtons.every(button => !button.disabled));
+  complete(scripts);
+  await submission;
+  assert.equal(element("ros-repair").value, scripts.repair);
+  assert(!repairButton.disabled);
+  await repairButton.handler();
+  assert.equal(copied(), scripts.repair);
+  context.postSettings = async () => { throw Error("synthetic generation failure"); };
+  await element("routeros-form").handlers.submit({ preventDefault() {}, submitter: {} });
+  assert.equal(element("ros-repair").value, "");
+  assert(repairButton.disabled);
+  assert(wanButtons.every(button => !button.disabled));
 });
 
 test("one, several, renamed and non-PPPoE interfaces replace fixed examples", () => {

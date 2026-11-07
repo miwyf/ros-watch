@@ -6,6 +6,93 @@ import (
 	"testing"
 )
 
+func requireSingleRouterOSTerminalBlock(t *testing.T, script string) {
+	t.Helper()
+	script = strings.TrimSpace(strings.ReplaceAll(script, "\r\n", "\n"))
+	if !strings.HasPrefix(script, "{\n") || !strings.HasSuffix(script, "\n}") {
+		t.Fatal("terminal commands must share one outer block; separate lines lose local variables")
+	}
+	depth, quoted, escaped, comment := 0, false, false, false
+	for i, r := range script {
+		if comment {
+			comment = r != '\n'
+			continue
+		}
+		if quoted {
+			if escaped {
+				escaped = false
+			} else if r == '\\' {
+				escaped = true
+			} else if r == '"' {
+				quoted = false
+			}
+			continue
+		}
+		switch r {
+		case '#':
+			comment = true
+		case '"':
+			quoted = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth < 0 || depth == 0 && i != len(script)-1 {
+				t.Fatal("script ends its terminal scope before all commands finish")
+			}
+		}
+	}
+	if depth != 0 || quoted {
+		t.Fatal("unbalanced RouterOS block or string")
+	}
+}
+
+func TestRouterOSGeneratedScriptsShareTerminalScope(t *testing.T) {
+	commands, err := buildRouterOSCommands("192.0.2.21", 15514)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, script := range map[string]string{"install": commands.Install, "upgrade": commands.Upgrade, "repair": commands.Repair} {
+		t.Run(name, func(t *testing.T) { requireSingleRouterOSTerminalBlock(t, script) })
+	}
+	for _, path := range []string{"routeros/ros-watch.rsc.example", "routeros/ros-watch-system.rsc.example", "routeros/ros-watch-repair.rsc.example"} {
+		data, err := assets.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		block, _, _ := strings.Cut(string(data), "# Rollback ONLY")
+		t.Run(path, func(t *testing.T) { requireSingleRouterOSTerminalBlock(t, block) })
+	}
+}
+
+func TestRouterOSRepairPreservesObservationRulesAndExistingTargets(t *testing.T) {
+	commands, err := buildRouterOSCommands("192.0.2.21", 15514)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`:local watchServer "192.0.2.21"`, ":local watchPort 15514", `remote-port=$watchPort`, "ROS-WATCH observation rules are missing", "ROSWatch target is not remote", "ROSWatch server differs", "ROSWatch port differs", "ROS Watch log forwarding repair completed"} {
+		if !strings.Contains(commands.Repair, expected) {
+			t.Fatal("repair guard or rendered target missing", expected)
+		}
+	}
+	for _, forbidden := range []string{"/ip firewall filter add", "/ip firewall filter set", "/ip firewall filter remove", "/ip firewall filter move", "/interface list add", "/system logging action set", "/system logging action remove", "/system logging remove", ":global"} {
+		if strings.Contains(commands.Repair, forbidden) {
+			t.Fatal("repair changes existing observation or logging configuration", forbidden)
+		}
+	}
+	if strings.Count(commands.Repair, "/system logging add") != 7 || !strings.Contains(commands.Repair, `action="ROSWatchSystem" and prefix="RW-SYS-OTHER "`) {
+		t.Fatal("firewall/system log repair coverage changed")
+	}
+	firstWrite := strings.Index(commands.Repair, "/system logging action add")
+	if strings.Index(commands.Repair, "ROSWatch port differs") > firstWrite {
+		t.Fatal("repair must check the existing target before adding any logging configuration")
+	}
+	firstInstallWrite := strings.Index(commands.Install, "/system logging action add")
+	if strings.Index(commands.Install, "ROS-WATCH observation rules already exist") < 0 || strings.Index(commands.Install, "ROS-WATCH observation rules already exist") > firstInstallWrite {
+		t.Fatal("partial-install guard must run before any installation write")
+	}
+}
+
 func TestRouterOSCommandsUseReviewedTemplate(t *testing.T) {
 	commands, err := buildRouterOSCommands("192.0.2.21", 15514)
 	if err != nil {
@@ -63,7 +150,7 @@ func TestRouterOSGeneratorAuthValidationAndNoSettingsMutation(t *testing.T) {
 	beforeSettings := b.settings(t)
 	body["syslog_port"] = 5514
 	code, data := b.request(t, "POST", "/api/routeros-script", body, true)
-	if code != 200 || decoded(t, data)["install"] == "" {
+	if code != 200 || decoded(t, data)["install"] == "" || decoded(t, data)["repair"] == "" {
 		t.Fatal("script generation failed", code)
 	}
 	afterAccount, _ := a.control.account(context.Background())
@@ -72,7 +159,7 @@ func TestRouterOSGeneratorAuthValidationAndNoSettingsMutation(t *testing.T) {
 		t.Fatal("generation changed account or collector settings")
 	}
 	code, page := b.request(t, "GET", "/", nil, false)
-	if code != 200 || !strings.Contains(string(page), "RouterOS 接入指令") || !strings.Contains(string(page), "/static/routeros.js") || !strings.Contains(string(page), "复制撤销指令") {
+	if code != 200 || !strings.Contains(string(page), "RouterOS 接入指令") || !strings.Contains(string(page), "/static/routeros.js") || !strings.Contains(string(page), "复制撤销指令") || !strings.Contains(string(page), `id="ros-repair"`) {
 		t.Fatal("instructions not available in settings page")
 	}
 	if code, _ := b.request(t, "GET", "/static/routeros.js", nil, false); code != 200 {

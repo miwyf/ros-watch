@@ -3,11 +3,11 @@
   <div class="routeros-body">
     <ol class="routeros-steps">
       <li>先到<button class="text-button routeros-settings-link" type="button" data-view="settings/logs">日志与观察规则 → 允许发送日志的设备</button>，保存路由器实际发送日志的内网地址。</li>
-      <li>填写 ROS 能访问的日志服务器 IPv4 地址和 Docker 对外映射的 UDP 端口，生成并复制接入指令。</li>
+      <li>填写 ROS 能访问的日志服务器 IPv4 地址和 Docker 对外映射的 UDP 端口，生成并复制接入指令；包括最外层大括号，整段一次粘贴执行，不要逐行执行。</li>
       <li>确认名为 WAN 的接口列表包含实际外网接口，并检查现有防火墙规则；下方根据“WAN 接口显示名称”生成检查与添加指令。列表名称不同需先修改接入脚本。</li>
       <li>执行后到“接收状态”查看有效记录。四条日志规则分别限制 10 条/秒、突发 20 条，看板统计为采样结果。</li>
     </ol>
-    <p class="inline-note">仅增加日志和转发配置，不新增放行、拦截或封禁规则。已接入的路由器使用下方“补充系统日志”指令，沿用已有日志目的地址与端口，不重复增加防火墙规则。系统日志包含登录、基础变更、接口、拨号、脚本及其他常规事件，排除 debug/packet。若只执行成功一部分，可核对后使用撤销指令移除本项目条目，再重新接入。</p>
+    <p class="inline-note">接入指令仅增加日志和转发配置，不新增放行、拦截或封禁规则。已接入的路由器使用“补充系统日志”；前次导入失败、已有观察规则但日志转发未建好时，使用“仅修复日志转发”，不要重复执行完整接入。系统日志包含登录、基础变更、接口、拨号、脚本及其他常规事件，排除 debug/packet。</p>
     <details class="routeros-details"><summary>接入前检查：Interface List（WAN 接口列表）</summary>
       <p class="inline-note">根据<button class="text-button routeros-settings-link" type="button" data-view="settings/logs">WAN 接口显示名称</button>每行等号左侧的接口名自动生成。例如 pppoe-out1=WAN1 使用 pppoe-out1，右侧显示名称不会写入指令。修改填写内容后指令同步更新，仍需手动复制执行。</p>
       <p class="inline-note">日志规则使用 in-interface-list=WAN 匹配外网入口。PPPoE 拨号应使用实际拨号接口，只加入底层物理网口不能代替拨号接口。先检查，接口已经属于 WAN 时无需添加；使用 include/exclude 或动态成员管理 WAN 时，也请先核对实际成员。</p>
@@ -28,6 +28,7 @@
     <div class="blocklist-settings"><div><h3>来源 IP 黑名单</h3><p>使用 blocked-sources 统一管理。在扫描列表复制封禁命令，首次使用先配置 RAW 规则。</p></div><button class="outline-button" type="button" data-blocklist-open>黑名单配置与检查</button></div>
     <div class="routeros-code-heading"><h3>接入指令</h3><button class="outline-button" type="button" data-ros-copy="ros-install" disabled>复制接入指令</button></div>
     <textarea id="ros-install" class="routeros-code" rows="14" readonly spellcheck="false" aria-label="RouterOS 接入脚本" placeholder="填写地址并生成后，在这里查看完整脚本"></textarea>
+    <details class="routeros-details"><summary>导入部分失败：仅修复日志转发</summary><p class="inline-note">已有 ROS-WATCH 观察规则时使用。按上方服务器 IP 和 UDP 端口补齐缺失的 ROSWatch 动作、访问日志转发及系统日志，不添加或删除防火墙观察规则。已有 ROSWatch 目标与填写值不一致时会停止，请先核对。整段执行，看到“ROS Watch log forwarding repair completed”才表示该段执行完成；此前成功的配置不会自动回滚。</p><div class="routeros-copy-row"><button class="outline-button" type="button" data-ros-copy="ros-repair" disabled>复制日志转发修复指令</button></div><textarea id="ros-repair" class="routeros-code" rows="12" readonly spellcheck="false" aria-label="日志转发修复指令"></textarea></details>
     <details class="routeros-details" open><summary>已有接入：补充系统日志</summary><p class="inline-note">已有 ROSWatch 转发时执行本段。使用独立 ROSWatchSystem 动作和类别标记；严重级别自动保留。完成后在“系统日志”查看新事件。重复执行不会重复添加，部分规则缺失时会补齐。</p><div class="routeros-copy-row"><button class="outline-button" type="button" data-ros-copy="ros-upgrade" disabled>复制补充系统日志指令</button></div><textarea id="ros-upgrade" class="routeros-code" rows="12" readonly spellcheck="false" aria-label="补充系统日志指令"></textarea></details>
     <details class="routeros-details"><summary>检查接入状态</summary><p class="inline-note">只查看日志转发配置、日志规则计数和本地日志，不修改路由器。</p><div class="routeros-copy-row"><button class="outline-button" type="button" data-ros-copy="ros-check" disabled>复制检查指令</button></div><textarea id="ros-check" class="routeros-code" rows="5" readonly spellcheck="false" aria-label="RouterOS 检查指令"></textarea></details>
     <details class="routeros-details"><summary>撤销 ROS Watch 新增项</summary><p class="inline-note">执行后停止这些日志的采集。只删除 ROS-WATCH 标记的过滤规则和 ROSWatch、ROSWatchSystem 日志动作；不会清空全部防火墙规则。</p><div class="routeros-copy-row"><button class="outline-button" type="button" data-ros-copy="ros-remove" disabled>复制撤销指令</button></div><textarea id="ros-remove" class="routeros-code" rows="6" readonly spellcheck="false" aria-label="RouterOS 撤销指令"></textarea></details>

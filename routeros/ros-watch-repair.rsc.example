@@ -1,0 +1,21 @@
+{
+# Repair forwarding after a partial installation; preserve observation rules.
+# Copy the entire block, including braces, into the terminal in one paste.
+:local watchServer "192.0.2.10"
+:local watchPort 5514
+:if ($watchServer = "192.0.2.10") do={ :error "Set watchServer to your log server IP before importing" }
+:if ([:len [/ip firewall filter find where comment~"^ROS-WATCH "]] = 0) do={ :error "ROS-WATCH observation rules are missing; use the full installation first" }
+:local watchAction [/system logging action find where name="ROSWatch"]
+:if ([:len $watchAction] > 1) do={ :error "Multiple ROSWatch actions found; review logging actions first" }
+:if ([:len $watchAction] > 0) do={
+  :if ([/system logging action get $watchAction target] != "remote") do={ :error "ROSWatch target is not remote; review the existing action first" }
+  :if ([:tostr [/system logging action get $watchAction remote]] != $watchServer) do={ :error "ROSWatch server differs; review the existing action first" }
+  :if ([/system logging action get $watchAction remote-port] != $watchPort) do={ :error "ROSWatch port differs; review the existing action first" }
+}
+:if ([:len $watchAction] = 0) do={
+  /system logging action add name=ROSWatch target=remote remote=$watchServer remote-port=$watchPort remote-log-format=syslog syslog-facility=local6 syslog-severity=info
+}
+:if ([:len [/system logging find where action="ROSWatch" and topics="firewall" and regex="RW-"]] = 0) do={
+  /system logging add topics=firewall regex="RW-" action=ROSWatch
+}
+}

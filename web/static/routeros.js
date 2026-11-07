@@ -21,7 +21,7 @@ function buildWANInterfaceCommands(text) {
   return {interfaces, check, add};
 }
 
-const routerosFields = ["ros-install", "ros-upgrade", "ros-check", "ros-remove", "ros-remove-system"];
+const routerosFields = ["ros-install", "ros-repair", "ros-upgrade", "ros-check", "ros-remove", "ros-remove-system"];
 const routerosCopyButtons = [...document.querySelectorAll("[data-ros-copy]")];
 const routerosGeneratedCopyButtons = routerosCopyButtons.filter(button => routerosFields.includes(button.dataset.rosCopy));
 const routerosWANCopyButtons = routerosCopyButtons.filter(button => ["ros-wan-check", "ros-wan-example"].includes(button.dataset.rosCopy));
@@ -58,12 +58,13 @@ $("routeros-form").addEventListener("submit", async (event) => {
       syslog_port: Number($("ros-port").value),
     });
     $("ros-install").value = result.install;
+    $("ros-repair").value = result.repair;
     $("ros-upgrade").value = result.upgrade;
     $("ros-remove-system").value = result.remove_system;
     $("ros-check").value = result.check;
     $("ros-remove").value = result.remove;
     for (const copy of routerosGeneratedCopyButtons) copy.disabled = false;
-    settingsMessage("ros-result", "已生成。首次接入复制完整指令；已有 ROSWatch 的设备使用补充系统日志指令，它沿用现有日志目的地址和端口。");
+    settingsMessage("ros-result", "已生成。包括最外层大括号，整段一次粘贴执行。首次接入用完整指令；已有观察规则但日志转发未建好用“仅修复日志转发”；已有 ROSWatch 用“补充系统日志”。");
   } catch (error) {
     settingsMessage("ros-result", error.message, true);
   } finally {
