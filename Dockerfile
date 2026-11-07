@@ -11,7 +11,8 @@ COPY geo ./geo
 COPY routeros ./routeros
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/ros-watch . \
     && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/probe ./cmd/probe \
-    && mkdir -p /out/data && chown 10001:10001 /out/data
+    && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/entrypoint ./cmd/entrypoint \
+    && mkdir -p /out/data && chown 1000:1000 /out/data
 
 FROM build AS test
 RUN go test -count=1 ./... && go vet ./...
@@ -25,12 +26,13 @@ COPY --from=build /out/probe /probe
 FROM scratch AS production
 ENV DATA_DIR=/data GOMEMLIMIT=128MiB TMPDIR=/data SQLITE_TMPDIR=/data
 COPY --from=build /out/ros-watch /ros-watch
+COPY --from=build /out/entrypoint /entrypoint
 COPY --from=build /src/geo /geo
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=build --chown=10001:10001 /out/data /data
-USER 10001:10001
+COPY --from=build --chown=1000:1000 /out/data /data
+USER 0:0
 VOLUME ["/data"]
 EXPOSE 8080/tcp 5514/udp
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD ["/ros-watch", "healthcheck"]
-ENTRYPOINT ["/ros-watch"]
+ENTRYPOINT ["/entrypoint"]

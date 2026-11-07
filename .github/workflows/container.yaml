@@ -39,6 +39,11 @@ jobs:
         run: |
           for script in web/static/*.js; do node --check "$script"; done
           node --test scripts/test_blocklist.cjs
+      - name: Test container users and data migration
+        run: |
+          docker build --target build -t ros-watch:uidgid-build .
+          docker build --target production -t ros-watch:uidgid-local .
+          python3 scripts/test_container_user.py
       - name: Check release version
         if: startsWith(github.ref, 'refs/tags/')
         env:
@@ -106,6 +111,7 @@ jobs:
           IMAGE_DIGEST: ${{ steps.existing.outputs.digest || steps.build.outputs.digest }}
         run: |
           docker run -d --name ros-watch-smoke --read-only --cap-drop ALL \
+            --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID \
             --security-opt no-new-privileges:true --memory 192m \
             -p 127.0.0.1:18086:8080 "$IMAGE@$IMAGE_DIGEST"
           trap 'docker logs ros-watch-smoke; docker rm -fv ros-watch-smoke' EXIT

@@ -2,7 +2,9 @@
 
 单容器 RouterOS 日志与外部访问观察台：来源 / 目标端口排行、访问趋势、疑似扫描、IP 归属地、明细筛选与 CSV 导出。界面适配电脑和手机，静态资源全部本地提供。
 
-版本 **0.7.4**。Go、内嵌网页资源和 SQLite，单个原生程序，无独立数据库或采集器。
+版本 **0.7.5**。Go、内嵌网页资源和 SQLite，单个原生程序，无独立数据库或采集器。
+
+0.7.5 支持通过 `PUID`、`PGID` 配置容器运行用户，两者分别默认 `1000`；启动时自动准备应用数据权限，兼容 Unraid 直接挂载和旧 `10001:10001` 数据卷。使用旧 Compose 升级时，请先同步新版 `cap_add` 配置，详见 [运行用户与宿主机目录挂载](#运行用户与宿主机目录挂载)。
 
 0.7.4 优化大日志量下的系统日志分页和汇总查询，修复最近 24 小时、7 天范围容易超时的问题。升级首次启动时会为已有日志创建查询索引，需要额外的索引空间和初始化时间；日志原文、保留策略及统计口径保持不变。
 
@@ -28,7 +30,7 @@ docker compose up -d
 docker compose ps
 ```
 
-默认使用 `latest`，跟随 main 上通过测试的最新构建。已有容器不会自行升级，更新时需要拉取镜像并重建容器。需要固定版本时，可将标签换成当前发布版本 `0.7.4`。网页端口为 8086，日志端口为 UDP 5514。
+默认使用 `latest`，跟随 main 上通过测试的最新构建。已有容器不会自行升级，更新时需要拉取镜像并重建容器。需要固定版本时，可将标签换成当前发布版本 `0.7.5`。网页端口为 8086，日志端口为 UDP 5514。
 
 ## 1Panel 编排部署
 
@@ -40,6 +42,9 @@ services:
     image: ghcr.io/miwyf/ros-watch:latest
     restart: unless-stopped
     init: true
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
     ports:
       - "8086:8080"
       - "5514:5514/udp"
@@ -49,6 +54,7 @@ services:
     tmpfs:
       - /tmp:size=16m,noexec,nosuid
     cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
     security_opt:
       - no-new-privileges:true
     mem_limit: 192m
@@ -76,6 +82,7 @@ docker volume create ros-watch-data
 docker run -d --name ros-watch --restart unless-stopped --init \
   -p 8086:8080 -p 5514:5514/udp \
   -v ros-watch-data:/data --read-only --cap-drop ALL \
+  --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID \
   --security-opt no-new-privileges:true --memory 192m --cpus 0.5 --pids-limit 64 \
   --log-driver local --log-opt max-size=5m --log-opt max-file=2 \
   ghcr.io/miwyf/ros-watch:latest
@@ -83,6 +90,23 @@ docker inspect --format '{{.State.Health.Status}}' ros-watch
 ```
 
 命名卷保存账号、设置和日志，删除或重建容器时保留它。Docker 命令方式与 Compose 默认生成的卷名不同，迁移已有部署时必须使用原来的数据卷。
+
+## 运行用户与宿主机目录挂载
+
+容器支持 `PUID`、`PGID` 环境变量，分别指定程序运行的 UID 和 GID。两者独立默认 `1000`，未填写或留空时使用默认值；只设置其中一个时，另一个仍为 `1000`。例如 Unraid 目录属主为 `99:100` 时，添加两个环境变量 `PUID=99`、`PGID=100`，并将宿主机 `/mnt/user/appdata/ros-watch` 映射到容器 `/data`，访问模式选择 Read/Write。环境变量必须为数字 ID。
+
+Compose 也可以在 `compose.yaml` 同目录的 `.env` 文件填写：
+
+```dotenv
+PUID=99
+PGID=100
+```
+
+需要直接挂载宿主机目录时，将 Compose 中 `ros-watch-data:/data` 替换为 `/宿主机路径/ros-watch:/data`，其余启动权限配置保持不变。
+
+容器启动阶段以 root 准备数据目录及 ROS Watch 自身数据库、数据库辅助文件和会话密钥的属主与必要读写权限，然后切换到指定 UID/GID 执行程序。已有 `10001:10001` 数据卷会在启动时调整到新的运行用户，账号、设置、日志及会话密钥继续沿用；目录中其他文件与子目录不会递归修改。`/data` 应专供 ROS Watch 使用。
+
+Compose 与上述 Docker 命令已配置初始化所需的 `CHOWN`、`DAC_OVERRIDE`、`FOWNER`、`SETUID`、`SETGID`；自行使用 `--cap-drop ALL` 时也需要添加这五项。只读挂载或禁止修改属主的远程存储仍需在宿主机准备权限。Docker `--user UID:GID` 也可直接指定运行用户，此时跳过 root 初始化，需要自行保证数据可写，并省略 `PUID/PGID` 或将其设为相同编号。
 
 ## 从源码编译部署
 
@@ -122,7 +146,7 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --build
 
 账号密码仅存储 Argon2id 密码哈希（独立随机盐，19 MiB / 2 次迭代 / 1 并行度），不保存可取回的明文密码。账号、设置和通知通道在 `/data/control.sqlite3`，日志在 `/data/events.sqlite3`，会话密钥在 `/data/session.key`，全部位于持久命名卷。改变环境变量不会覆盖后台已保存的账号或参数。
 
-容器以非 root 运行，根文件系统只读，数据持久化到 `/data`，默认限制 192 MiB 内存 / 0.5 CPU。不要执行 `docker compose down -v`，它会删除账号、设置和日志所在的数据卷。
+容器完成权限初始化后默认以 `1000:1000` 非 root 用户运行，根文件系统只读，数据持久化到 `/data`，默认限制 192 MiB 内存 / 0.5 CPU。不要执行 `docker compose down -v`，它会删除账号、设置和日志所在的数据卷。
 
 ## 告警通知
 
@@ -164,7 +188,7 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --build
 在服务器的项目目录执行交互式恢复：
 
 ```sh
-docker compose exec ros-watch /ros-watch reset-password
+docker compose exec ros-watch /entrypoint reset-password
 ```
 
 命令通过隐藏输入读取新密码，不接受命令行密码参数。需要同时恢复用户名时追加 `--username 新用户名`。恢复会让所有旧网页登录失效，不删除日志。
@@ -222,6 +246,8 @@ UDP 可能丢包，来源白名单只限制发送地址而不构成密码学认�
 
 更新前备份数据和部署配置，升级时保持同一 Compose 项目名和数据卷，以沿用账号、设置与日志。
 
+从 0.7.4 或更早版本升级到 0.7.5 时，先将本文 Compose 中的 `environment` 与 `cap_add` 配置合并到原编排，保留原有卷名、路径和端口，再拉取镜像重建容器。仅替换镜像但保留旧 `cap_drop: [ALL]` 配置会缺少初始化和切换用户所需的权限。
+
 默认 `latest` 的部署执行以下命令更新镜像并重建容器，数据卷保留：
 
 ```sh
@@ -235,7 +261,7 @@ docker compose pull && docker compose up -d
 [GitHub Actions](https://github.com/miwyf/ros-watch/actions/workflows/container.yaml) 在推送 `main`、推送 `v*` 标签、提交 PR 或手动运行时执行测试、竞争检测、静态检查及 Compose 校验。纯 Markdown 文档提交跳过工作流。测试通过后，main 会构建并推送 amd64、arm64 镜像到 GHCR，版本标签优先复用同一提交已有的镜像；没有已发布镜像时才构建，并启动已发布镜像做健康和初始化页面检查；PR 只测试，不发布。
 
 - `main` 发布 `latest` 和 `sha-<完整提交号>`。
-- `v0.7.4` 这类标签发布 `0.7.4` 和对应 SHA 标签，标签版本必须与 `config.go` 一致。
+- `v0.7.5` 这类标签发布 `0.7.5` 和对应 SHA 标签，标签版本必须与 `config.go` 一致。
 - 工作流使用仓库自带 `GITHUB_TOKEN` 发布到 GHCR。首次发布后需在 GitHub 的 Package settings 将镜像包可见性设为 Public，公开仓库本身不会自动公开镜像。
 - 修改先在本地 Docker 验证，通过后再统一提交并推送 main。新版本修改 `config.go` 和 README 的版本号，Compose 默认镜像保持 `latest`；确认 main 镜像发布成功，再推送同版本的 `v` 标签，复用已有镜像而不重复构建。发布标签不应移动或覆盖。
 
