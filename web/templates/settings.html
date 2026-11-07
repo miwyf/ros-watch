@@ -1,37 +1,24 @@
 <section id="settings-view" class="view hidden">
   <div class="settings-tabs" role="tablist" aria-label="系统设置分区">
-    <button id="settings-tab-logs" type="button" role="tab" data-settings-tab="logs" aria-controls="settings-panel-logs" aria-selected="true" tabindex="0">日志与观察规则</button>
+    <button id="settings-tab-connection" type="button" role="tab" data-settings-tab="connection" aria-controls="settings-panel-connection" aria-selected="true" tabindex="0">接入设置</button>
+    <button id="settings-tab-logs" type="button" role="tab" data-settings-tab="logs" aria-controls="settings-panel-logs" aria-selected="false" tabindex="-1">日志管理</button>
     <button id="settings-tab-account" type="button" role="tab" data-settings-tab="account" aria-controls="settings-panel-account" aria-selected="false" tabindex="-1">账号安全</button>
     <button id="settings-tab-notifications" type="button" role="tab" data-settings-tab="notifications" aria-controls="settings-panel-notifications" aria-selected="false" tabindex="-1">告警通知</button>
-    <button id="settings-tab-routeros" type="button" role="tab" data-settings-tab="routeros" aria-controls="settings-panel-routeros" aria-selected="false" tabindex="-1">RouterOS 接入</button>
   </div>
-  <section id="settings-panel-logs" role="tabpanel" aria-labelledby="settings-tab-logs" class="settings-panel">
-<form id="runtime-form" class="panel settings-form">
-      <div class="panel-heading">
-        <div>
-          <h2>日志与观察规则</h2>
-          <p>只调整看板，不修改路由器的放行或拦截策略。</p>
-        </div>
-        <span class="tag">即时生效</span>
-      </div>
+  <section id="settings-panel-connection" role="tabpanel" aria-labelledby="settings-tab-connection" class="settings-panel">
+    <form id="connection-form" class="panel settings-form">
+      <div class="panel-heading"><h2>设备与接口</h2><div class="connection-actions"><span id="connection-result" role="status"></span><button id="connection-save" class="primary" type="submit">保存设置</button></div></div>
       <div class="settings-fields">
-        <label class="full-field"
-          >允许发送日志的设备<textarea
-            id="set-allowed_senders"
-            rows="3"
-            maxlength="4096"
-            placeholder="填写路由器的内网 IP 或网段，每行一个"
-          ></textarea><small
-            >留空时暂停接收。填写发送日志的设备地址，而非外部访问者地址。</small
-          ></label
-        >
-        <label class="full-field"
-          >WAN 接口显示名称<textarea
-            id="set-wan_map"
-            rows="3"
-            placeholder="接口名称=显示名称，例如 pppoe-out1=WAN1"
-          ></textarea><small>每行一组。名称变更只影响之后收到的记录。</small></label
-        >
+        <label>允许发送日志的设备<textarea id="set-allowed_senders" rows="2" maxlength="4096" placeholder="路由器的 IP 或网段，每行一个"></textarea><small>路由器发送日志的地址，留空暂停接收。</small></label>
+        <label>WAN 接口显示名称<textarea id="set-wan_map" rows="2" placeholder="pppoe-out1=电信&#10;pppoe-out2=联通" aria-describedby="wan-map-help"></textarea><small id="wan-map-help">每行：ROS 接口名=显示别名。左边须与 ROS 完全一致，右边自定义，不修改 ROS 接口名。</small></label>
+      </div>
+    </form>
+    {{template "routeros.html" .}}
+  </section>
+  <section id="settings-panel-logs" role="tabpanel" aria-labelledby="settings-tab-logs" class="settings-panel hidden">
+    <form id="runtime-form" class="panel settings-form">
+      <div class="panel-heading"><h2>日志管理</h2><span class="tag">即时生效</span></div>
+      <div class="settings-fields">
         <label
           >保留期限（天）<input
             id="set-retention_days"
@@ -91,7 +78,7 @@
         >
       </div>
       <div class="settings-actions">
-        <button class="primary" type="submit">保存日志设置</button
+        <button id="runtime-save" class="primary" type="submit">保存日志设置</button
         ><span id="runtime-result" role="status"></span>
       </div>
     </form>
@@ -177,8 +164,5 @@
     </div>
     <div class="settings-actions"><button class="primary" type="submit">保存通知设置</button><button id="notification-test" type="button">测试发送</button><span id="notification-result" role="status"></span></div>
   </form>
-  </section>
-  <section id="settings-panel-routeros" role="tabpanel" aria-labelledby="settings-tab-routeros" class="settings-panel hidden">
-{{template "routeros.html" .}}
   </section>
 </section>

@@ -24,8 +24,8 @@ let view = "overview",
   pending = false;
 const filterNames = ["hours", "wan", "scope", "proto", "outcome"];
 const viewNames = ["overview", "events", "logs", "system", "settings"];
-const settingsTabNames = ["logs", "account", "notifications", "routeros"];
-let settingsTab = "logs";
+const settingsTabNames = ["connection", "logs", "account", "notifications"];
+let settingsTab = "connection";
 function params(search = false) {
   const p = new URLSearchParams();
   for (const k of filterNames) if ($(k).value) p.set(k, $(k).value);
@@ -52,13 +52,14 @@ function fail(message) {
 }
 function showView(name) {
   let requestedTab = null;
-  if (name === "routeros") { name = "settings"; requestedTab = "routeros"; }
+  if (name === "routeros") { name = "settings"; requestedTab = "connection"; }
   else if (name.startsWith("settings/")) { requestedTab = name.slice(9); name = "settings"; }
+  if (requestedTab === "routeros") requestedTab = "connection";
   if (name === "settings" && requestedTab !== null)
-    settingsTab = settingsTabNames.includes(requestedTab) ? requestedTab : "logs";
+    settingsTab = settingsTabNames.includes(requestedTab) ? requestedTab : "connection";
   if (!viewNames.includes(name)) name = "overview";
   view = name;
-  const fragment = name === "overview" ? "" : name === "settings" && settingsTab !== "logs" ? "#settings/" + settingsTab : "#" + name;
+  const fragment = name === "overview" ? "" : name === "settings" && settingsTab !== "connection" ? "#settings/" + settingsTab : "#" + name;
   if (window.location.hash !== fragment)
     window.history.replaceState(null, "", window.location.pathname + window.location.search + fragment);
   window.scrollTo({ top: 0, behavior: "instant" });

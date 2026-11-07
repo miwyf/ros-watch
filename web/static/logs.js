@@ -28,7 +28,7 @@ async function refreshLogs(reset = false) {
     const c = r.status.counters;
     const losses = ["rate_dropped", "queue_dropped", "storage_dropped", "oversized"].reduce((n, k) => n + (c[k] || 0), 0);
     $("logs-coverage").textContent = "原始日志 " + format(r.coverage.stored) + " 条；覆盖 " + date(r.coverage.oldest) + " 至 " + date(r.coverage.newest) + "。UDP 可能丢包，与访问记录均按设置的保留天数清理。";
-    $("notice").textContent = !r.status.sources_configured ? "请先在系统设置保存路由器日志来源白名单。" : r.coverage.system_logs ? "已收到系统日志。未知格式保留原文；UDP 传输可能丢包。" : "尚未收到系统事件，请在 RouterOS 接入页生成并执行补充系统日志指令。防火墙原文沿用现有接入。";
+    $("notice").textContent = !r.status.sources_configured ? "请先在接入设置中保存允许发送日志的设备。" : r.coverage.system_logs ? "已收到系统日志。未知格式保留原文；UDP 传输可能丢包。" : "尚未收到系统事件，可在接入设置的“更多操作”中补充系统日志。";
     if (losses) $("notice").textContent += " 本次运行有 " + format(losses) + " 条报文因保护限制未入库。";
     renderStorage(r.status.storage);
     if (r.status.storage.space_pruned) $("notice").textContent += " 曾因空间不足提前清理 " + format(r.status.storage.space_pruned) + " 条，最近 " + date(r.status.storage.last_space_cleanup) + "。";

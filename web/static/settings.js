@@ -63,29 +63,38 @@ window.loadSettings = async function () {
     $("account-username").value = account.username;
     settingsLoaded = true;
   } catch (e) {
+    settingsMessage("connection-result", e.message, true);
     settingsMessage("runtime-result", e.message, true);
   } finally { settingsLoading = false; }
 };
-$("runtime-form").addEventListener("submit", async (e) => {
+let runtimeSaving = false;
+for (const form of ["connection-form", "runtime-form"]) $(form).addEventListener("submit", async (e) => {
   e.preventDefault();
-  const button = e.submitter;
-  button.disabled = true;
+  if (runtimeSaving) return;
+  const connection = form === "connection-form";
+  const resultID = connection ? "connection-result" : "runtime-result";
+  const buttons = [$("connection-save"), $("runtime-save")];
+  runtimeSaving = true;
+  for (const button of buttons) button.disabled = true;
   try {
-    const mapping = parseWANMapping($("set-wan_map").value);
-    const body = {
-      allowed_senders: $("set-allowed_senders").value,
-      wan_map: mapping,
-      sampling: $("set-sampling").value,
-      disk_low_action: $("set-disk_low_action").value,
-    };
-    for (const key of runtimeNumbers) body[key] = Number($("set-" + key).value);
-    const result = await postSettings("/api/settings", body);
-    settingsMessage("runtime-result", result.message);
+    if (!settingsLoaded) throw Error("设置尚未加载，请稍后重试");
+    const body = { ...(await api("/api/settings")).settings };
+    if (connection) {
+      body.allowed_senders = $("set-allowed_senders").value;
+      body.wan_map = parseWANMapping($("set-wan_map").value);
+    } else {
+      body.sampling = $("set-sampling").value;
+      body.disk_low_action = $("set-disk_low_action").value;
+      for (const key of runtimeNumbers) body[key] = Number($("set-" + key).value);
+    }
+    await postSettings("/api/settings", body);
+    settingsMessage(resultID, "已保存");
     refresh();
   } catch (error) {
-    settingsMessage("runtime-result", error.message, true);
+    settingsMessage(resultID, error.message, true);
   } finally {
-    button.disabled = false;
+    runtimeSaving = false;
+    for (const button of buttons) button.disabled = false;
   }
 });
 $("account-form").addEventListener("submit", async (e) => {

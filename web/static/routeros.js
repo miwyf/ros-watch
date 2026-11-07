@@ -21,10 +21,11 @@ function buildWANInterfaceCommands(text) {
   return {interfaces, check, add};
 }
 
-const routerosFields = ["ros-install", "ros-repair", "ros-upgrade", "ros-check", "ros-remove", "ros-remove-system"];
+const routerosDialog = $("routeros-dialog");
 const routerosCopyButtons = [...document.querySelectorAll("[data-ros-copy]")];
-const routerosGeneratedCopyButtons = routerosCopyButtons.filter(button => routerosFields.includes(button.dataset.rosCopy));
-const routerosWANCopyButtons = routerosCopyButtons.filter(button => ["ros-wan-check", "ros-wan-example"].includes(button.dataset.rosCopy));
+const routerosWANCopyButtons = routerosCopyButtons.filter(button => button.dataset.rosCopy.startsWith("ros-wan-"));
+const routerosCommandCopyButton = routerosCopyButtons.find(button => button.dataset.rosCopy === "ros-script");
+let routerosRequest = 0;
 function updateRouterOSWANCommands() {
   $("ros-wan-check").value = "";
   $("ros-wan-example").value = "";
@@ -34,7 +35,7 @@ function updateRouterOSWANCommands() {
     $("ros-wan-check").value = commands.check;
     $("ros-wan-example").value = commands.add;
     for (const button of routerosWANCopyButtons) button.disabled = false;
-    settingsMessage("ros-wan-result", "当前接口：" + commands.interfaces.join("、") + "。已按当前填写内容生成，未保存的修改也会使用。");
+    settingsMessage("ros-wan-result", "接口：" + commands.interfaces.join("、"));
   } catch (error) {
     settingsMessage("ros-wan-result", error.message, true);
   }
@@ -45,31 +46,63 @@ if (settingsLoaded || $("set-wan_map").value.trim()) updateRouterOSWANCommands()
 const pageHost = window.location.hostname;
 if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(pageHost) && !pageHost.startsWith("127.") && pageHost !== "0.0.0.0")
   $("ros-server").value = pageHost;
-$("routeros-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const button = event.submitter;
-  button.disabled = true;
-  for (const field of routerosFields) $(field).value = "";
-  for (const copy of routerosGeneratedCopyButtons) copy.disabled = true;
-  settingsMessage("ros-result", "正在生成指令…");
+const routerosCommandInfo = {
+  install: ["一键接入指令", "包含访问日志和系统日志。整段复制到 ROS 终端执行，包含最外层大括号。"],
+  check: ["接入状态", "复制到 ROS 终端查看，不修改配置。"],
+  remove: ["撤销指令", "停止 ROS Watch 日志采集，保留 WAN 接口成员。"],
+  upgrade: ["仅补充系统日志", "已有接入时使用。整段复制到 ROS 终端执行，包含最外层大括号。"],
+  remove_system: ["仅撤销系统日志", "保留防火墙访问日志采集。"],
+  wan: ["WAN 接口配置", "外网接口已在 WAN 列表中可跳过。添加指令包含最外层大括号，整段执行。"],
+  more: ["更多操作", ""],
+};
+async function openRouterOSCommand(kind) {
+  if (kind === "install" && !$("routeros-form").reportValidity()) return;
+  const request = ++routerosRequest;
+  const [title, note] = routerosCommandInfo[kind];
+  $("ros-dialog-title").textContent = title;
+  $("ros-dialog-note").textContent = note;
+  settingsMessage("ros-copy-result", "");
+  const command = kind !== "wan" && kind !== "more";
+  $("ros-command-view").classList.toggle("hidden", !command);
+  $("ros-wan-view").classList.toggle("hidden", kind !== "wan");
+  $("ros-more-view").classList.toggle("hidden", kind !== "more");
+  $("ros-script").value = "";
+  routerosCommandCopyButton.disabled = true;
+  if (kind === "wan") updateRouterOSWANCommands();
+  if (!routerosDialog.open) routerosDialog.showModal();
+  if (!command) return;
+  settingsMessage("ros-copy-result", "正在生成…");
   try {
-    const result = await postSettings("/api/routeros-script", {
-      server_address: $("ros-server").value.trim(),
-      syslog_port: Number($("ros-port").value),
-    });
-    $("ros-install").value = result.install;
-    $("ros-repair").value = result.repair;
-    $("ros-upgrade").value = result.upgrade;
-    $("ros-remove-system").value = result.remove_system;
-    $("ros-check").value = result.check;
-    $("ros-remove").value = result.remove;
-    for (const copy of routerosGeneratedCopyButtons) copy.disabled = false;
-    settingsMessage("ros-result", "已生成。包括最外层大括号，整段一次粘贴执行。首次接入用完整指令；已有观察规则但日志转发未建好用“仅修复日志转发”；已有 ROSWatch 用“补充系统日志”。");
+    const body = { command: kind };
+    if (kind === "install") {
+      body.server_address = $("ros-server").value.trim();
+      body.syslog_port = Number($("ros-port").value);
+    }
+    const result = await postSettings("/api/routeros-script", body);
+    if (request !== routerosRequest || !routerosDialog.open) return;
+    $("ros-script").value = result[kind];
+    $("ros-script").scrollTop = 0;
+    $("ros-script").scrollLeft = 0;
+    routerosCommandCopyButton.disabled = false;
+    settingsMessage("ros-copy-result", "");
   } catch (error) {
-    settingsMessage("ros-result", error.message, true);
-  } finally {
-    button.disabled = false;
+    if (request === routerosRequest && routerosDialog.open)
+      settingsMessage("ros-copy-result", error.message, true);
   }
+}
+$("routeros-form").addEventListener("submit", event => {
+  event.preventDefault();
+  openRouterOSCommand("install");
+});
+for (const button of document.querySelectorAll("[data-ros-open]")) {
+  if (button.dataset.rosOpen !== "install")
+    button.addEventListener("click", () => openRouterOSCommand(button.dataset.rosOpen));
+}
+$("ros-dialog-close").addEventListener("click", () => routerosDialog.close());
+routerosDialog.addEventListener("close", () => { ++routerosRequest; });
+$("ros-open-blocklist").addEventListener("click", () => {
+  routerosDialog.close();
+  openSourceBlocklist();
 });
 for (const button of routerosCopyButtons) button.addEventListener("click", async () => {
   const field = $(button.dataset.rosCopy);
@@ -82,10 +115,10 @@ for (const button of routerosCopyButtons) button.addEventListener("click", async
       field.setSelectionRange(0, field.value.length);
       if (!document.execCommand("copy")) throw Error("manual copy required");
     }
-    settingsMessage("ros-result", "已复制，请在 ROS 终端粘贴执行。");
+    settingsMessage("ros-copy-result", "已复制");
   } catch {
     field.focus();
     field.select();
-    settingsMessage("ros-result", "浏览器未允许自动复制，请全选或长按代码手动复制。", true);
+    settingsMessage("ros-copy-result", "请全选代码手动复制", true);
   }
 });

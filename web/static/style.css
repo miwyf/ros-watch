@@ -1195,12 +1195,12 @@ body.loading #refresh {
 }
 
 /* RouterOS instructions: read-only previews and manual copy */
-.routeros-help { margin-top: 0; }
+.routeros-help { margin-top: 20px; }
 .routeros-settings-link { padding: 0 4px; color: var(--accent); font-size: inherit; }
 .routeros-body { padding: 0 22px 22px; }
 .routeros-steps { padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.9; }
 .routeros-steps li { margin: 7px 0; }
-.routeros-generator { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, .45fr) auto; gap: 16px; align-items: start; margin: 20px 0 12px; }
+.routeros-generator { display: grid; grid-template-columns: minmax(0, 1fr) minmax(130px, .3fr); gap: 16px; align-items: start; margin: 0 0 18px; }
 .routeros-generator label { display: flex; flex-direction: column; gap: 7px; min-width: 0; font-size: 12px; color: #afbed0; }
 .routeros-generator input { width: 100%; min-width: 0; }
 .routeros-generator small { color: var(--muted); font-size: 11px; line-height: 1.6; }
@@ -1211,6 +1211,17 @@ body.loading #refresh {
 .routeros-details { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 20px; }
 .routeros-details summary { cursor: pointer; font-size: 13px; color: #afbed0; }
 .routeros-copy-row { display: flex; justify-content: flex-end; margin: 12px 0; }
+.routeros-actions { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px; }
+.routeros-dialog { width:min(1000px,calc(100vw - 32px)); max-height:calc(100dvh - 40px); overflow:auto; padding:24px; border:1px solid var(--border); border-radius:var(--radius); background:var(--panel); color:var(--text); }
+.routeros-dialog::backdrop { background:rgb(0 0 0 / .65); }
+.routeros-dialog-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.routeros-dialog-heading h2 { font-size:18px; margin:0; }
+.routeros-dialog > .inline-note { margin:12px 0 18px; }
+.routeros-dialog .routeros-code { max-height:50dvh; }
+.routeros-dialog .routeros-copy-row { margin-bottom:0; }
+.routeros-more { display:flex; flex-wrap:wrap; gap:12px; margin-top:20px; }
+#ros-copy-result:empty, #ros-result:empty { display:none; }
+@media (max-width:480px) { .routeros-dialog { padding:16px; } .routeros-actions button { flex:1 1 auto; justify-content:center; } }
 @media (max-width: 760px) { .routeros-generator { grid-template-columns: 1fr; } .routeros-generator > button { margin-top: 0; justify-content: center; } .routeros-body { padding: 0 16px 18px; } }
 @media (max-width: 800px) {
   .sidebar nav { min-width: 0; max-width: 100%; overflow-x: auto; }
@@ -1250,6 +1261,13 @@ body.loading #refresh {
 .settings-tabs button[aria-selected="true"] { color:var(--accent); border-color:var(--accent); background:#192a23; }
 .settings-tabs button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .settings-panel { min-width:0; }
+#connection-form .panel-heading { padding:14px 20px 10px; }
+#connection-form .settings-fields { gap:12px 20px; padding:0 20px 16px; align-items:start; }
+#connection-form .settings-fields label { gap:5px; }
+#connection-form .settings-fields textarea { min-height:60px; height:60px; padding:7px 10px; line-height:1.6; }
+.connection-actions { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:6px 12px; }
+.connection-actions .primary { padding:7px 14px; }
+#connection-result:empty { display:none; }
 .storage-summary summary { cursor:pointer; font-size:13px; font-weight:600; }
 .storage-summary summary span { margin-left:10px; color:var(--muted); font-size:11px; font-weight:400; overflow-wrap:anywhere; }
 .storage-summary[open] summary { margin-bottom:10px; }

@@ -8,10 +8,13 @@ function page() {
   const elements = {};
   const element = id => elements[id] ||= {
     value: "", disabled: false, textContent: "", handlers: {},
-    classList: { toggle() {} },
+    classList: { toggle() {} }, open: false,
+    reportValidity() { return true; },
+    showModal() { this.open = true; },
+    close() { this.open = false; this.handlers.close?.(); },
     addEventListener(event, handler) { this.handlers[event] = handler; },
   };
-  const buttons = ["ros-wan-check", "ros-wan-example", "ros-install", "ros-repair", "ros-upgrade", "ros-check", "ros-remove", "ros-remove-system"].map(id => ({
+  const buttons = ["ros-wan-check", "ros-wan-example", "ros-script"].map(id => ({
     dataset: { rosCopy: id }, disabled: true,
     addEventListener(event, handler) { this.handler = handler; },
   }));
@@ -19,7 +22,7 @@ function page() {
   const context = vm.createContext({
     $: element,
     window: { location: { hostname: "127.0.0.1" } },
-    document: { querySelectorAll: () => buttons },
+    document: { querySelectorAll: selector => selector === "[data-ros-copy]" ? buttons : [] },
     navigator: { clipboard: { async writeText(value) { copied = value; } } },
     setInterval() {}, renderStorage() {}, dl() {},
   });
@@ -40,29 +43,50 @@ test("WAN commands use every interface on the left and ignore display names", ()
   assert.doesNotMatch(commands.add, /pppoe-client|\/ip firewall|\/ip route/);
 });
 
-test("repair generation, copy and failure handling keep WAN commands independent", async () => {
+test("command dialogs generate and copy the complete selected script; failures clear stale output", async () => {
   const { context, element, buttons, copied } = page();
   element("set-wan_map").value = "ether1=WAN";
   element("set-wan_map").handlers.input();
-  const scripts = { install: "install block", repair: "repair block", upgrade: "upgrade block", check: "check", remove: "remove", remove_system: "remove system" };
-  let complete;
-  context.postSettings = () => new Promise(resolve => { complete = resolve; });
-  const submission = element("routeros-form").handlers.submit({ preventDefault() {}, submitter: {} });
-  const repairButton = buttons.find(button => button.dataset.rosCopy === "ros-repair");
+  element("ros-server").value = "192.0.2.21";
+  element("ros-port").value = "15514";
+  const scripts = { install: "{\ninstall and system logs\n}", check: "check", remove: "remove", upgrade: "upgrade", remove_system: "remove system" };
+  let complete, sent;
+  context.postSettings = (url, body) => { sent = body; return new Promise(resolve => { complete = resolve; }); };
+  const opening = context.openRouterOSCommand("install");
+  const copyButton = buttons.find(button => button.dataset.rosCopy === "ros-script");
   const wanButtons = buttons.filter(button => button.dataset.rosCopy.startsWith("ros-wan-"));
-  assert(repairButton.disabled);
+  assert(copyButton.disabled);
   assert(wanButtons.every(button => !button.disabled));
+  assert.equal(sent.server_address, "192.0.2.21");
+  assert.equal(sent.syslog_port, 15514);
   complete(scripts);
-  await submission;
-  assert.equal(element("ros-repair").value, scripts.repair);
-  assert(!repairButton.disabled);
-  await repairButton.handler();
-  assert.equal(copied(), scripts.repair);
+  await opening;
+  assert.equal(element("ros-script").value, scripts.install);
+  assert(!copyButton.disabled);
+  await copyButton.handler();
+  assert.equal(copied(), scripts.install);
   context.postSettings = async () => { throw Error("synthetic generation failure"); };
-  await element("routeros-form").handlers.submit({ preventDefault() {}, submitter: {} });
-  assert.equal(element("ros-repair").value, "");
-  assert(repairButton.disabled);
+  await context.openRouterOSCommand("check");
+  assert.equal(element("ros-script").value, "");
+  assert(copyButton.disabled);
+  assert.match(element("ros-copy-result").textContent, /synthetic generation failure/);
   assert(wanButtons.every(button => !button.disabled));
+});
+
+test("auxiliary commands need no server; closed dialogs discard delayed responses", async () => {
+  const { context, element } = page();
+  let complete;
+  context.postSettings = (url, body) => {
+    assert.equal(body.command, "check");
+    assert(!Object.hasOwn(body, "server_address"));
+    return new Promise(resolve => { complete = resolve; });
+  };
+  const opening = context.openRouterOSCommand("check");
+  element("routeros-dialog").close();
+  complete({ check: "late check output" });
+  await opening;
+  assert.equal(element("ros-script").value, "");
+  assert(!element("routeros-dialog").open);
 });
 
 test("one, several, renamed and non-PPPoE interfaces replace fixed examples", () => {
@@ -112,7 +136,7 @@ test("settings load generates commands; input updates drafts and clears stale co
   await wanButtons[1].handler();
   assert.equal(copied(), element("ros-wan-example").value);
   context.postSettings = async () => { throw Error("synthetic generation failure"); };
-  await element("routeros-form").handlers.submit({ preventDefault() {}, submitter: {} });
+  await context.openRouterOSCommand("install");
   assert(wanButtons.every(button => !button.disabled));
   assert(element("ros-wan-example").value.includes('interface="ether1"'));
   element("set-wan_map").value = "ether1=";
@@ -124,4 +148,36 @@ test("settings load generates commands; input updates drafts and clears stale co
   element("set-wan_map").handlers.input();
   assert(wanButtons.every(button => !button.disabled));
   assert.match(element("ros-wan-result").textContent, /vlan200/);
+});
+
+test("connection and log settings save independently and preserve other-tab drafts", async () => {
+  const { context, element } = page();
+  let saved = { allowed_senders: "192.0.2.1", wan_map: { ether1: "WAN" }, retention_days: 7, min_free_mb: 1024, queue_size: 4096, ingest_per_second: 500, scan_ports: 15, scan_window: 300, sampling: "limited", disk_low_action: "prune" };
+  context.api = async url => {
+    if (url === "/api/settings") return { settings: saved, storage: {} };
+    if (url === "/api/account") return { username: "admin" };
+    return { settings: { platform: "feishu", trusted_admins: "" }, status: {} };
+  };
+  context.refresh = () => {};
+  await context.window.loadSettings();
+  context.postSettings = async (url, body) => { saved = JSON.parse(JSON.stringify(body)); return { message: "saved" }; };
+  element("set-retention_days").value = "14";
+  element("set-allowed_senders").value = "192.0.2.2";
+  element("set-wan_map").value = "pppoe-out1=主线";
+  // Another client updated a log setting; saving connection settings must keep it.
+  saved.scan_ports = 25;
+  await element("connection-form").handlers.submit({ preventDefault() {} });
+  assert.equal(saved.allowed_senders, "192.0.2.2");
+  assert.equal(saved.wan_map["pppoe-out1"], "主线");
+  assert.equal(saved.retention_days, 7);
+  assert.equal(saved.scan_ports, 25);
+  assert.equal(element("set-retention_days").value, "14");
+  element("set-wan_map").value = "unfinished invalid draft";
+  element("set-allowed_senders").value = "unfinished address";
+  await element("runtime-form").handlers.submit({ preventDefault() {} });
+  assert.equal(saved.retention_days, 14);
+  assert.equal(saved.allowed_senders, "192.0.2.2");
+  assert.equal(saved.wan_map["pppoe-out1"], "主线");
+  assert.equal(element("set-wan_map").value, "unfinished invalid draft");
+  assert.equal(element("runtime-result").textContent, "已保存");
 });

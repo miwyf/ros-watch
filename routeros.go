@@ -31,37 +31,22 @@ func routerOSTemplateBody(path string) (string, error) {
 }
 
 func routerOSTerminalBlock(body, completion string) string {
-	return "{\n" + strings.TrimSpace(body) + "\n:put \"" + completion + "\"\n}"
+	lines := []string{"{"}
+	for _, line := range strings.Split(strings.TrimSpace(body), "\n") {
+		if text := strings.TrimSpace(line); text != "" && !strings.HasPrefix(text, "#") {
+			lines = append(lines, strings.TrimRight(line, "\r"))
+		}
+	}
+	return strings.Join(lines, "\n") + "\n:put \"" + completion + "\"\n}"
 }
 
-func buildRouterOSCommands(server string, port int) (RouterOSCommands, error) {
+func routerOSAuxiliaryCommands() (RouterOSCommands, error) {
 	result := RouterOSCommands{}
-	address, err := netip.ParseAddr(strings.TrimSpace(server))
-	if err != nil || !address.Is4() || address.IsLoopback() || !address.IsGlobalUnicast() || address.IsLinkLocalUnicast() || address.String() == "192.0.2.10" {
-		return result, errors.New("请填写 ROS 能访问的日志服务器 IPv4 地址，不能使用回环地址或模板占位地址")
-	}
-	if port < 1 || port > 65535 {
-		return result, errors.New("UDP 端口须为 1–65535")
-	}
-	install, err := routerOSTemplateBody("routeros/ros-watch.rsc.example")
-	if err != nil {
-		return result, errors.New("接入指令暂不可用")
-	}
 	upgrade, err := routerOSTemplateBody("routeros/ros-watch-system.rsc.example")
 	if err != nil {
 		return result, errors.New("系统日志指令暂不可用")
 	}
-	repair, err := routerOSTemplateBody("routeros/ros-watch-repair.rsc.example")
-	if err != nil {
-		return result, err
-	}
-	renderTarget := func(body string) string {
-		body = strings.Replace(body, `:local watchServer "192.0.2.10"`, `:local watchServer "`+address.String()+`"`, 1)
-		return strings.Replace(body, ":local watchPort 5514", ":local watchPort "+strconv.Itoa(port), 1)
-	}
 	result.Upgrade = routerOSTerminalBlock(upgrade, "ROS Watch system logs ready")
-	result.Install = routerOSTerminalBlock(renderTarget(install)+"\n\n"+upgrade, "ROS Watch installation completed")
-	result.Repair = routerOSTerminalBlock(renderTarget(repair)+"\n\n"+upgrade, "ROS Watch log forwarding repair completed")
 	result.Check = `/system logging action print detail where name="ROSWatch"
 /system logging action print detail where name="ROSWatchSystem"
 /system logging print detail where action="ROSWatch"
@@ -77,6 +62,41 @@ func buildRouterOSCommands(server string, port int) (RouterOSCommands, error) {
 	return result, nil
 }
 
+func buildRouterOSCommands(server string, port int) (RouterOSCommands, error) {
+	result := RouterOSCommands{}
+	address, err := netip.ParseAddr(strings.TrimSpace(server))
+	if err != nil || !address.Is4() || address.IsLoopback() || !address.IsGlobalUnicast() || address.IsLinkLocalUnicast() || address.String() == "192.0.2.10" {
+		return result, errors.New("请填写 ROS 能访问的日志服务器 IPv4 地址，不能使用回环地址或模板占位地址")
+	}
+	if port < 1 || port > 65535 {
+		return result, errors.New("UDP 端口须为 1–65535")
+	}
+	result, err = routerOSAuxiliaryCommands()
+	if err != nil {
+		return result, err
+	}
+	upgrade, err := routerOSTemplateBody("routeros/ros-watch-system.rsc.example")
+	if err != nil {
+		return result, errors.New("系统日志指令暂不可用")
+	}
+	install, err := routerOSTemplateBody("routeros/ros-watch.rsc.example")
+	if err != nil {
+		return result, errors.New("接入指令暂不可用")
+	}
+	repair, err := routerOSTemplateBody("routeros/ros-watch-repair.rsc.example")
+	if err != nil {
+		return result, err
+	}
+	renderTarget := func(body string) string {
+		body = strings.Replace(body, `:local watchServer "192.0.2.10"`, `:local watchServer "`+address.String()+`"`, 1)
+		return strings.Replace(body, ":local watchPort 5514", ":local watchPort "+strconv.Itoa(port), 1)
+	}
+	result.Install = routerOSTerminalBlock(renderTarget(install)+"\n\n"+upgrade, "ROS Watch installation completed")
+	result.Repair = routerOSTerminalBlock(renderTarget(repair)+"\n\n"+upgrade, "ROS Watch log forwarding repair completed")
+
+	return result, nil
+}
+
 func (a *App) routerOSScript(w http.ResponseWriter, r *http.Request) {
 	_, s, ok := a.authorized(w, r)
 	if !ok {
@@ -87,14 +107,24 @@ func (a *App) routerOSScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Server string `json:"server_address"`
-		Port   int    `json:"syslog_port"`
+		Server  string `json:"server_address"`
+		Port    int    `json:"syslog_port"`
+		Command string `json:"command"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		apiError(w, 400, err.Error())
 		return
 	}
-	commands, err := buildRouterOSCommands(body.Server, body.Port)
+	var commands RouterOSCommands
+	var err error
+	switch body.Command {
+	case "", "install":
+		commands, err = buildRouterOSCommands(body.Server, body.Port)
+	case "check", "remove", "upgrade", "remove_system":
+		commands, err = routerOSAuxiliaryCommands()
+	default:
+		err = errors.New("未知接入指令")
+	}
 	if err != nil {
 		apiError(w, 400, err.Error())
 		return

@@ -159,10 +159,39 @@ func TestRouterOSGeneratorAuthValidationAndNoSettingsMutation(t *testing.T) {
 		t.Fatal("generation changed account or collector settings")
 	}
 	code, page := b.request(t, "GET", "/", nil, false)
-	if code != 200 || !strings.Contains(string(page), "RouterOS 接入指令") || !strings.Contains(string(page), "/static/routeros.js") || !strings.Contains(string(page), "复制撤销指令") || !strings.Contains(string(page), `id="ros-repair"`) {
+	if code != 200 || !strings.Contains(string(page), "一键接入指令") || !strings.Contains(string(page), "/static/routeros.js") || !strings.Contains(string(page), `id="routeros-dialog"`) || strings.Contains(string(page), `id="ros-repair"`) {
 		t.Fatal("instructions not available in settings page")
 	}
 	if code, _ := b.request(t, "GET", "/static/routeros.js", nil, false); code != 200 {
 		t.Fatal("script UI asset missing")
+	}
+}
+
+func TestRouterOSAuxiliaryCommandsWithoutServer(t *testing.T) {
+	a := testApp(t)
+	b := browser(t, a)
+	body := map[string]any{"command": "check"}
+	if code, _ := b.request(t, "POST", "/api/routeros-script", body, false); code != 401 {
+		t.Fatal("anonymous auxiliary command accepted", code)
+	}
+	b.login(t, "admin", "test-account-password")
+	if code, _ := b.request(t, "POST", "/api/routeros-script", body, false); code != 400 {
+		t.Fatal("missing CSRF accepted", code)
+	}
+	for _, command := range []string{"check", "remove", "upgrade", "remove_system"} {
+		body["command"] = command
+		code, data := b.request(t, "POST", "/api/routeros-script", body, true)
+		if code != 200 || decoded(t, data)[command] == "" {
+			t.Fatal("auxiliary command requires an irrelevant server address", command, code)
+		}
+		if command == "check" && strings.Contains(decoded(t, data)[command].(string), "remove") {
+			t.Fatal("status command modifies configuration")
+		}
+	}
+	for _, command := range []string{"install", "unknown", "repair"} {
+		body["command"] = command
+		if code, _ := b.request(t, "POST", "/api/routeros-script", body, true); code != 400 {
+			t.Fatal("invalid or incomplete command accepted", command, code)
+		}
 	}
 }
