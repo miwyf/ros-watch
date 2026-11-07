@@ -23,6 +23,18 @@ function postSettings(path, body) {
     body: JSON.stringify(body),
   });
 }
+function parseWANMapping(text) {
+  const mapping = Object.create(null);
+  for (const line of text.split(/\r?\n/).map(line => line.trim()).filter(Boolean)) {
+    const i = line.indexOf("=");
+    if (i < 1 || !line.slice(i + 1).trim())
+      throw Error("WAN 映射每行须为 接口名称=显示名称");
+    const key = line.slice(0, i).trim();
+    if (Object.hasOwn(mapping, key)) throw Error("WAN 接口名称不能重复");
+    mapping[key] = line.slice(i + 1).trim();
+  }
+  return mapping;
+}
 let settingsLoaded = false;
 let settingsLoading = false;
 window.loadSettings = async function () {
@@ -44,6 +56,7 @@ window.loadSettings = async function () {
     $("set-wan_map").value = Object.entries(s.wan_map)
       .map(([key, value]) => key + "=" + value)
       .join("\n");
+    window.updateRouterOSWANCommands?.();
     for (const key of runtimeNumbers) $("set-" + key).value = s[key];
     $("set-sampling").value = s.sampling;
     $("set-disk_low_action").value = s.disk_low_action;
@@ -58,18 +71,7 @@ $("runtime-form").addEventListener("submit", async (e) => {
   const button = e.submitter;
   button.disabled = true;
   try {
-    const mapping = Object.create(null);
-    for (const line of $("set-wan_map")
-      .value.split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean)) {
-      const i = line.indexOf("=");
-      if (i < 1 || !line.slice(i + 1).trim())
-        throw Error("WAN 映射每行须为 接口名称=显示名称");
-      const key = line.slice(0, i).trim();
-      if (Object.hasOwn(mapping, key)) throw Error("WAN 接口名称不能重复");
-      mapping[key] = line.slice(i + 1).trim();
-    }
+    const mapping = parseWANMapping($("set-wan_map").value);
     const body = {
       allowed_senders: $("set-allowed_senders").value,
       wan_map: mapping,

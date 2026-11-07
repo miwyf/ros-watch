@@ -39,6 +39,7 @@ jobs:
         run: |
           for script in web/static/*.js; do node --check "$script"; done
           node --test scripts/test_blocklist.cjs
+          node --test scripts/test_routeros.cjs
       - name: Test container users and data migration
         run: |
           docker build --target build -t ros-watch:uidgid-build .
