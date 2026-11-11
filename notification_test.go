@@ -161,7 +161,7 @@ func TestNotificationThresholdsCooldownWindowsAndTrustedSources(t *testing.T) {
 		t.Fatal("trusted/unknown sources or success dedup failed")
 	}
 	port := 80
-	e := Event{TS: float64(now.Unix()), Sender: "192.0.2.1", Src: "198.51.100.30", Scope: "router", Dport: &port}
+	e := Event{TS: float64(now.Unix()), Sender: "192.0.2.1", Src: "198.51.100.30", Scope: "router", Dport: &port, Direction: trafficInbound}
 	if messages, _, _ := d.process(&s, &runtime, []Event{e, e, e}, now); len(messages) != 0 {
 		t.Fatal("duplicate ports counted")
 	}

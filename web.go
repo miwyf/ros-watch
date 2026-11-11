@@ -182,6 +182,8 @@ func (a *App) handler() http.Handler {
 	mux.HandleFunc("GET /api/map", a.accessMap)
 	mux.HandleFunc("GET /api/map/settings", a.mapSettings)
 	mux.HandleFunc("POST /api/map/settings", a.mapSettings)
+	mux.HandleFunc("GET /api/business", a.businessRules)
+	mux.HandleFunc("POST /api/business", a.businessRules)
 	mux.HandleFunc("GET /api/events", a.events)
 	mux.HandleFunc("GET /api/export", a.export)
 	mux.HandleFunc("GET /api/logs", a.logs)
@@ -628,8 +630,12 @@ func (a *App) filters(r *http.Request) (Filters, error) {
 	}
 	now := unixNow()
 	f := Filters{Since: now - hours*3600, Until: now, Fields: map[string]any{}}
-	choices := map[string]string{"scope": "|router|forward|", "outcome": "|blocked|attempt|", "proto": "|TCP|UDP|ICMP|ICMPV6|IPV6-ICMP|GRE|ESP|"}
-	for _, key := range []string{"src", "dport", "wan", "scope", "outcome", "proto"} {
+	f.ScanOrder = valueOr(q.Get("scan_order"), "latest")
+	if f.ScanOrder != "latest" && f.ScanOrder != "ports" && f.ScanOrder != "count" {
+		return f, errors.New("invalid scan order")
+	}
+	choices := map[string]string{"scope": "|router|forward|", "outcome": "|blocked|attempt|", "proto": "|TCP|UDP|ICMP|ICMPV6|IPV6-ICMP|GRE|ESP|", "direction": "|inbound|response|unknown|"}
+	for _, key := range []string{"src", "dport", "wan", "scope", "outcome", "proto", "direction"} {
 		value := strings.TrimSpace(q.Get(key))
 		if value == "" {
 			continue
@@ -699,7 +705,7 @@ func (a *App) summary(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := boundedContext(r.Context())
 	defer cancel()
 	fields, _ := json.Marshal(f.Fields)
-	key := strconv.FormatInt(int64(f.Since)/10, 10) + ":" + strconv.FormatInt(int64(f.Until)/10, 10) + string(fields)
+	key := strconv.FormatInt(int64(f.Since)/10, 10) + ":" + strconv.FormatInt(int64(f.Until)/10, 10) + string(fields) + ":" + f.ScanOrder
 	a.queryMu.Lock()
 	cached, ok := a.cache[key]
 	var data map[string]any
@@ -737,7 +743,7 @@ func (a *App) summary(w http.ResponseWriter, r *http.Request) {
 	}
 	response["status"] = a.collector.status()
 	response["generated_at"] = unixNow()
-	response["locations"] = a.locations(data["sources"].([]map[string]any), data["scans"].([]map[string]any))
+	response["locations"] = a.locations(data["sources"].([]map[string]any), data["scans"].([]map[string]any), data["latest_scans"].([]map[string]any), data["business_sources"].([]map[string]any), data["attention"].([]map[string]any))
 	response["geo"] = map[string]any{"available": a.geo != nil, "source": "ip2region", "version": geoDataVersion}
 	jsonResponse(w, 200, response)
 }
@@ -810,10 +816,10 @@ func (a *App) export(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", "attachment; filename=ros-watch.csv")
 	_, _ = io.WriteString(w, "\ufeff")
 	csvWriter := csv.NewWriter(w)
-	_ = csvWriter.Write([]string{"ts", "src", "sport", "dst", "dport", "proto", "wan", "scope", "outcome", "src_location", "src_isp"})
+	_ = csvWriter.Write([]string{"ts", "src", "sport", "dst", "dport", "proto", "wan", "scope", "outcome", "src_location", "src_isp", "direction", "business"})
 	for _, e := range rows {
 		location := a.geo.location(e.Src)
-		record := []string{strconv.FormatFloat(e.TS, 'f', 6, 64), e.Src, portText(e.Sport), e.Dst, portText(e.Dport), e.Proto, e.WAN, e.Scope, e.Outcome, location.Label, location.ISP}
+		record := []string{strconv.FormatFloat(e.TS, 'f', 6, 64), e.Src, portText(e.Sport), e.Dst, portText(e.Dport), e.Proto, e.WAN, e.Scope, e.Outcome, location.Label, location.ISP, e.Direction, e.Business}
 		for i, value := range record {
 			if len(value) > 0 && strings.ContainsRune("=+-@", rune(value[0])) {
 				record[i] = "'" + value

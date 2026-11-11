@@ -1,0 +1,11 @@
+<dialog id="business-dialog" class="business-dialog">
+  <div class="business-heading"><h2 id="business-title">正常业务</h2><button id="business-close" class="text-button" type="button" aria-label="关闭正常业务">关闭 ×</button></div>
+  <form id="business-form" class="hidden">
+    <p id="business-connection" class="business-connection"></p>
+    <label for="business-name">业务名称<input id="business-name" maxlength="64" required placeholder="例如 MQTT 上报"></label>
+    <p class="inline-note">标记仅匹配这条来源、目标服务及日志设备。该来源访问其他端口时继续检测，原始记录和统计仍然保留。</p>
+    <div class="business-actions"><button class="primary" type="submit">保存业务标记</button></div>
+  </form>
+  <div id="business-rules"></div>
+  <p id="business-message" class="inline-note" role="status"></p>
+</dialog>

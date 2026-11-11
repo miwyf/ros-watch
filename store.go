@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-const eventColumns = "ts,sender,src,sport,dst,dport,proto,flags,wan,interface,scope,outcome,raw"
+const eventColumns = "ts,sender,src,sport,dst,dport,proto,flags,wan,interface,scope,outcome,raw,direction"
 
 type Store struct {
 	writer, reader   *sql.DB
@@ -51,6 +51,14 @@ func openStore(dir string, settings *atomic.Pointer[Settings]) (*Store, error) {
  CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY,ts REAL NOT NULL,sender TEXT NOT NULL,src TEXT NOT NULL,sport INTEGER,dst TEXT NOT NULL,dport INTEGER,proto TEXT NOT NULL,flags TEXT NOT NULL,wan TEXT NOT NULL,interface TEXT NOT NULL,scope TEXT NOT NULL,outcome TEXT NOT NULL,raw TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS events_time ON events(ts);CREATE INDEX IF NOT EXISTS events_source_time ON events(src,ts);`)
 	if err != nil {
+		writer.Close()
+		return nil, err
+	}
+	if err = migrateTraffic(writer); err != nil {
+		writer.Close()
+		return nil, err
+	}
+	if _, err = writer.Exec(businessSchema + `CREATE INDEX IF NOT EXISTS events_direction_time ON events(direction,ts);`); err != nil {
 		writer.Close()
 		return nil, err
 	}
@@ -113,7 +121,7 @@ func (s *Store) append(ctx context.Context, events []Event) error {
 		return err
 	}
 	defer tx.Rollback()
-	statement, err := tx.PrepareContext(ctx, "INSERT INTO events ("+eventColumns+") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+	statement, err := tx.PrepareContext(ctx, "INSERT INTO events ("+eventColumns+") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
 	if err != nil {
 		return err
 	}
@@ -133,7 +141,10 @@ func (s *Store) append(ctx context.Context, events []Event) error {
 		if e.Scope == "" {
 			continue
 		}
-		if _, err = statement.ExecContext(ctx, e.TS, e.Sender, e.Src, e.Sport, e.Dst, e.Dport, e.Proto, e.Flags, e.WAN, e.Interface, e.Scope, e.Outcome, e.Raw); err != nil {
+		if e.Direction == "" {
+			e.Direction = classifyTraffic(e)
+		}
+		if _, err = statement.ExecContext(ctx, e.TS, e.Sender, e.Src, e.Sport, e.Dst, e.Dport, e.Proto, e.Flags, e.WAN, e.Interface, e.Scope, e.Outcome, e.Raw, e.Direction); err != nil {
 			return err
 		}
 	}
@@ -201,12 +212,13 @@ func (s *Store) diskOK() bool {
 type Filters struct {
 	Since, Until float64
 	Fields       map[string]any
+	ScanOrder    string
 }
 
 func (f Filters) where() (string, []any) {
 	terms := []string{"ts >= ?", "ts <= ?"}
 	values := []any{f.Since, f.Until}
-	for _, key := range []string{"wan", "proto", "scope", "outcome", "src", "dport"} {
+	for _, key := range []string{"wan", "proto", "scope", "outcome", "src", "dport", "direction"} {
 		if value, ok := f.Fields[key]; ok {
 			terms = append(terms, key+" = ?")
 			values = append(values, value)
@@ -222,7 +234,7 @@ func (s *Store) events(ctx context.Context, f Filters, limit int, before int64) 
 		args = append(args, before)
 	}
 	args = append(args, limit)
-	rows, err := s.reader.QueryContext(ctx, "SELECT id,"+eventColumns+" FROM events WHERE "+where+" ORDER BY id DESC LIMIT ?", args...)
+	rows, err := s.reader.QueryContext(ctx, "SELECT id,"+eventColumns+","+businessNameSQL+" FROM events WHERE "+where+" ORDER BY id DESC LIMIT ?", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +243,7 @@ func (s *Store) events(ctx context.Context, f Filters, limit int, before int64) 
 	for rows.Next() {
 		e := Event{}
 		var sport, dport sql.NullInt64
-		if err = rows.Scan(&e.ID, &e.TS, &e.Sender, &e.Src, &sport, &e.Dst, &dport, &e.Proto, &e.Flags, &e.WAN, &e.Interface, &e.Scope, &e.Outcome, &e.Raw); err != nil {
+		if err = rows.Scan(&e.ID, &e.TS, &e.Sender, &e.Src, &sport, &e.Dst, &dport, &e.Proto, &e.Flags, &e.WAN, &e.Interface, &e.Scope, &e.Outcome, &e.Raw, &e.Direction, &e.Business); err != nil {
 			return nil, err
 		}
 		if sport.Valid {
@@ -296,7 +308,7 @@ func (s *Store) summary(ctx context.Context, f Filters) (map[string]any, error) 
 		params = append(params, args...)
 		return queryMaps(ctx, s.reader, sql, params...)
 	}
-	totals, err := query("SELECT COUNT(*) observations,COUNT(DISTINCT src) sources,COUNT(DISTINCT dport) ports,COALESCE(SUM(outcome='blocked'),0) blocked FROM events WHERE " + where)
+	totals, err := query("SELECT COUNT(*) observations,COUNT(DISTINCT src) sources,COUNT(DISTINCT dport) ports,COALESCE(SUM(outcome='blocked'),0) blocked,COALESCE(SUM(" + businessExistsSQL + "),0) business FROM events WHERE " + where)
 	if err != nil {
 		return nil, err
 	}
@@ -318,9 +330,60 @@ func (s *Store) summary(ctx context.Context, f Filters) (map[string]any, error) 
 	}
 	scanArgs := append([]any{settings.ScanWindow}, args...)
 	scanArgs = append(scanArgs, settings.ScanPorts)
-	scans, err := queryMaps(ctx, s.reader, `SELECT src,MAX(ports) ports,SUM(n) n,MAX(last) last FROM (
- SELECT src,CAST(ts / ? AS INTEGER) window,COUNT(DISTINCT dport) ports,COUNT(*) n,MAX(ts) last FROM events WHERE `+where+` AND dport IS NOT NULL GROUP BY src,window HAVING ports >= ?
- ) GROUP BY src ORDER BY ports DESC,n DESC LIMIT 20`, scanArgs...)
+	scanQuery := `SELECT sender,src,MAX(ports) ports,SUM(n) n,MIN(first) first,MAX(last) last,COUNT(*) OVER() total FROM (
+ SELECT sender,src,CAST(ts / ? AS INTEGER) window,COUNT(DISTINCT dport) ports,COUNT(*) n,MIN(ts) first,MAX(ts) last FROM events WHERE ` + where + ` AND direction='inbound' AND dport IS NOT NULL GROUP BY sender,src,window HAVING ports >= ?
+ ) GROUP BY sender,src`
+	order := "last DESC,sender,src"
+	if f.ScanOrder == "ports" {
+		order = "ports DESC,last DESC,sender,src"
+	}
+	if f.ScanOrder == "count" {
+		order = "n DESC,last DESC,sender,src"
+	}
+	scans, err := queryMaps(ctx, s.reader, scanQuery+" ORDER BY "+order+" LIMIT 20", scanArgs...)
+	if err != nil {
+		return nil, err
+	}
+	latest := scans
+	if f.ScanOrder != "" && f.ScanOrder != "latest" {
+		latest, err = queryMaps(ctx, s.reader, scanQuery+" ORDER BY last DESC,sender,src LIMIT 20", scanArgs...)
+		if err != nil {
+			return nil, err
+		}
+	}
+	attention, systemEvents, err := s.homeAttention(ctx, f, latest)
+	if err != nil {
+		return nil, err
+	}
+	businessSources, err := query("SELECT src,COUNT(*) n,COUNT(DISTINCT dport) ports,MAX(ts) last FROM events WHERE " + where + " AND " + businessExistsSQL + " GROUP BY src ORDER BY n DESC,src LIMIT 10")
+	if err != nil {
+		return nil, err
+	}
+	businessPorts, err := query("SELECT dport,proto,COUNT(*) n FROM events WHERE " + where + " AND " + businessExistsSQL + " GROUP BY dport,proto ORDER BY n DESC,dport LIMIT 8")
+	if err != nil {
+		return nil, err
+	}
+	suspiciousPorts := make([]map[string]any, 0)
+	if len(latest) > 0 {
+		terms := make([]string, 0, len(latest))
+		portArgs := append([]any{}, args...)
+		for _, source := range latest {
+			terms = append(terms, "(sender=? AND src=?)")
+			portArgs = append(portArgs, source["sender"], source["src"])
+		}
+		suspiciousPorts, err = queryMaps(ctx, s.reader, "SELECT dport,proto,COUNT(*) n FROM events WHERE "+where+" AND direction='inbound' AND NOT "+businessExistsSQL+" AND ("+strings.Join(terms, " OR ")+") GROUP BY dport,proto ORDER BY n DESC,dport LIMIT 8", portArgs...)
+		if err != nil {
+			return nil, err
+		}
+	}
+	trafficFields := make(map[string]any, len(f.Fields))
+	for key, value := range f.Fields {
+		if key != "direction" {
+			trafficFields[key] = value
+		}
+	}
+	trafficWhere, trafficArgs := (Filters{Since: f.Since, Until: f.Until, Fields: trafficFields}).where()
+	traffic, err := queryMaps(ctx, s.reader, "SELECT direction,COUNT(*) n FROM events WHERE "+trafficWhere+" GROUP BY direction", trafficArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +402,11 @@ func (s *Store) summary(ctx context.Context, f Filters) (map[string]any, error) 
 	if len(totals) != 1 || len(coverage) != 1 {
 		return nil, errors.New("invalid aggregate result")
 	}
-	return map[string]any{"totals": totals[0], "trend": filled, "sources": sources, "ports": ports, "wans": wans, "scans": scans, "coverage": coverage[0], "bucket_seconds": bucket}, nil
+	var scanCount any = int64(0)
+	if len(scans) > 0 {
+		scanCount = scans[0]["total"]
+	}
+	return map[string]any{"totals": totals[0], "trend": filled, "sources": sources, "ports": ports, "wans": wans, "scans": scans, "scan_count": scanCount, "latest_scans": latest, "attention": attention, "system_events": systemEvents, "business_sources": businessSources, "business_ports": businessPorts, "suspicious_ports": suspiciousPorts, "traffic": traffic, "coverage": coverage[0], "bucket_seconds": bucket}, nil
 }
 
 func boundedContext(parent context.Context) (context.Context, context.CancelFunc) {

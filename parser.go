@@ -22,6 +22,8 @@ type Event struct {
 	Interface string    `json:"interface"`
 	Scope     string    `json:"scope"`
 	Outcome   string    `json:"outcome"`
+	Direction string    `json:"direction"`
+	Business  string    `json:"business,omitempty"`
 	Raw       string    `json:"raw"`
 }
 
@@ -87,7 +89,9 @@ func parseMessage(data []byte, sender string, mapping map[string]string, ts floa
 	if prefix == "RW-DROP" {
 		outcome = "blocked"
 	}
-	return &Event{TS: ts, Sender: sender, Src: src, Sport: sport, Dst: dst, Dport: dport, Proto: strings.ToUpper(proto[1]), Flags: proto[2], WAN: wan, Interface: iface, Scope: scope, Outcome: outcome, Raw: truncateRunes(text, 1200)}
+	event := &Event{TS: ts, Sender: sender, Src: src, Sport: sport, Dst: dst, Dport: dport, Proto: strings.ToUpper(proto[1]), Flags: proto[2], WAN: wan, Interface: iface, Scope: scope, Outcome: outcome, Raw: truncateRunes(text, 1200)}
+	event.Direction = classifyTraffic(*event)
+	return event
 }
 
 func truncateRunes(text string, max int) string {

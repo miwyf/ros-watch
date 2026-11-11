@@ -99,7 +99,7 @@ func (d *notificationDetector) process(s *NotificationSettings, runtime *Setting
 				}
 			}
 		}
-		if s.Scans && event.Scope != "" && event.Src != "" && event.Dport != nil {
+		if s.Scans && scanEligible(event) && event.Scope != "" && event.Src != "" && event.Dport != nil {
 			key := event.Sender + "\x00" + event.Src
 			window := int64(event.TS) / int64(runtime.ScanWindow)
 			bucket := d.scans[key]

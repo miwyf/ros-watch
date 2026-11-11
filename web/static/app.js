@@ -22,13 +22,41 @@ let view = "overview",
   cursor = null,
   loading = false,
   pending = false;
-const filterNames = ["hours", "wan", "scope", "proto", "outcome"];
+const filterNames = ["hours", "wan", "scope", "proto", "outcome", "direction"];
 const viewNames = ["overview", "map", "events", "logs", "system", "settings"];
 const settingsTabNames = ["connection", "logs", "account", "notifications", "mqtt"];
 let settingsTab = "connection";
 let receiverState = null, accessCoverage = null, systemCoverage = null, summaryUpdatedAt = null;
+let autoRefresh = true, overviewScroll = 0, eventRequest = null;
+function restoreLocation() {
+  const query = new URLSearchParams(location.search);
+  for (const key of filterNames) {
+    const fallback = key === "hours" ? "12" : key === "direction" ? "inbound" : "";
+    const value = query.get(key) ?? fallback;
+    if (key === "wan" && value && value.length <= 256 && ![...$(key).options].some(option=>option.value===value)) $(key).add(new Option(value,value));
+    $(key).value = [...$(key).options].some(option=>option.value===value) ? value : fallback;
+  }
+  for (const key of ["src","dport"]) $(key).value = query.get(key) || "";
+  const order = query.get("scan_order");
+  $("scan-order").value = ["latest","ports","count"].includes(order) ? order : "latest";
+  cursor = /^[1-9][0-9]*$/.test(query.get("before") || "") ? query.get("before") : null;
+  for (const key of ["hours","category","severity","event","device","username","source","q"]) {
+    const value=query.get("logs_"+key);
+    $("logs-"+key).value=value ?? (key==="hours" ? "12" : "");
+  }
+}
+function writeLocation(push = false) {
+  const fragment = view === "overview" ? "" : view === "settings" && settingsTab !== "connection" ? "#settings/"+settingsTab : "#"+view;
+  const values=params(view === "events");
+  if(view==="events" && cursor)values.set("before",cursor);
+  if(view==="logs")for(const key of ["hours","category","severity","event","device","username","source","q"]){const value=$("logs-"+key).value.trim();if(value)values.set("logs_"+key,value);}
+  const query = values.toString();
+  const target = location.pathname + (query ? "?"+query : "") + fragment;
+  if (target !== location.pathname+location.search+location.hash) history[push ? "pushState" : "replaceState"](null,"",target);
+  window.ROSHome?.filters();
+}
 function updateFilterSummary() {
-  $("filter-summary").textContent = $("hours").selectedOptions[0].textContent + (summaryUpdatedAt ? " · 更新于 " + clock(summaryUpdatedAt) : " · 正在更新…");
+  $("filter-summary").replaceChildren(node("span",$("hours").selectedOptions[0].textContent+" · ","filter-range-label"),node("span",summaryUpdatedAt ? "更新于 "+clock(summaryUpdatedAt) : "正在更新…"));
 }
 function renderReceiverStatus() {
   const notice = $("notice");
@@ -70,6 +98,7 @@ function params(search = false) {
   if (search)
     for (const k of ["src", "dport"])
       if ($(k).value.trim()) p.set(k, $(k).value.trim());
+  p.set("scan_order", $("scan-order").value);
   return p;
 }
 async function api(path, options = {}) {
@@ -88,7 +117,7 @@ function fail(message) {
   $("connection").classList.add("stale");
   $("connection-text").textContent = "刷新失败";
 }
-function showView(name) {
+function showView(name, push = false, keepCursor = false) {
   let requestedTab = null;
   if (name === "routeros") { name = "settings"; requestedTab = "connection"; }
   else if (name.startsWith("settings/")) { requestedTab = name.slice(9); name = "settings"; }
@@ -96,12 +125,12 @@ function showView(name) {
   if (name === "settings" && requestedTab !== null)
     settingsTab = settingsTabNames.includes(requestedTab) ? requestedTab : "connection";
   if (!viewNames.includes(name)) name = "overview";
+  if(name==="events" && !keepCursor) cursor=null;
+  if (view === "overview" && name !== "overview") overviewScroll = window.scrollY;
   view = name;
   document.body.classList.toggle("map-page", name === "map");
-  const fragment = name === "overview" ? "" : name === "settings" && settingsTab !== "connection" ? "#settings/" + settingsTab : "#" + name;
-  if (window.location.hash !== fragment)
-    window.history.replaceState(null, "", window.location.pathname + window.location.search + fragment);
-  window.scrollTo({ top: 0, behavior: "instant" });
+  writeLocation(push);
+  document.querySelectorAll(".mobile-nav-more").forEach(menu=>menu.open=false);
   const titles = {
     overview: "访问概览",
     map: "来源地图",
@@ -117,11 +146,13 @@ function showView(name) {
   document
     .querySelectorAll("[data-view]")
     .forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+  window.scrollTo({ top: name === "overview" ? overviewScroll : 0, behavior: "instant" });
 
   document
     .querySelector(".filterbar")
     .classList.toggle("hidden", name === "settings" || name === "logs");
   $("refresh").classList.toggle("hidden", name === "settings");
+  $("auto-refresh").classList.toggle("hidden", name === "settings");
   renderReceiverStatus();
   window.ROSMap?.setVisible(name === "map");
   if (name === "map") refresh();
@@ -138,7 +169,6 @@ function showView(name) {
   }
   if (name === "logs") refreshLogs(true);
   if (name === "events") {
-    cursor = null;
     refreshEvents().catch((e) => fail(e.message));
   }
 }
@@ -159,7 +189,7 @@ for (const button of document.querySelectorAll("[data-settings-tab]")) {
 function drill(field, value) {
   $(field === "src" ? "dport" : "src").value = "";
   $(field).value = String(value);
-  showView("events");
+  showView("events", true);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 function empty(container, text) {
@@ -232,7 +262,7 @@ function trend(rows) {
       x: left - 8,
       y: y + 3,
       fill: "#6e8096",
-      "font-size": 9,
+      "font-size": 11,
       "text-anchor": "end",
     });
     t.textContent = format(Math.round(max * (1 - i / 3)));
@@ -272,9 +302,20 @@ function trend(rows) {
     svg.append(circle);
   }
   box.append(svg);
+  const tooltip = node("div",undefined,"trend-tooltip hidden"); box.append(tooltip);
+  const inspect = event => {
+    const bounds=svg.getBoundingClientRect();
+    const x=(event.clientX-bounds.left)/bounds.width*width;
+    const index=Math.max(0,Math.min(rows.length-1,Math.round((x-left)/(right-left)*(rows.length-1))));
+    tooltip.textContent=date(rows[index].t)+" · "+format(rows[index].n)+" 条";
+    tooltip.style.left=Math.max(0,Math.min(bounds.width-240,event.clientX-bounds.left-100))+"px";
+    tooltip.classList.remove("hidden");
+  };
+  svg.addEventListener("pointermove",inspect);svg.addEventListener("pointerdown",inspect);svg.addEventListener("pointerleave",()=>tooltip.classList.add("hidden"));
+  const spansDays=rows[rows.length-1].t-rows[0].t>=86400;
   $("trend-axis").replaceChildren(
     ...[0, 0.25, 0.5, 0.75, 1].map((f) =>
-      node("span", clock(rows[Math.round((rows.length - 1) * f)].t)),
+      node("span", (spansDays ? new Date(rows[Math.round((rows.length-1)*f)].t*1000).toLocaleDateString("zh-CN",{month:"2-digit",day:"2-digit"})+" " : "") + clock(rows[Math.round((rows.length - 1) * f)].t)),
     ),
   );
 }
@@ -292,8 +333,11 @@ function rankPorts(rows) {
       fill = node("div", undefined, "bar-fill");
     fill.style.width = (r.n / max) * 100 + "%";
     track.append(fill);
+    const label=node("span", (r.dport ?? "无端口") + " / " + r.proto);
+    const service=window.ROSHome.services[r.dport];
+    if(service){const hint=node("small",service,"port-service");hint.title="常见端口用途，不代表实际服务识别";label.append(hint);}
     b.append(
-      node("span", (r.dport ?? "无端口") + " / " + r.proto),
+      label,
       track,
       node("span", format(r.n)),
     );
@@ -303,7 +347,7 @@ function rankPorts(rows) {
       $("proto").value = ["TCP", "UDP", "ICMP"].includes(r.proto)
         ? r.proto
         : "";
-      showView("events");
+      showView("events", true);
     });
     box.append(b);
   }
@@ -351,8 +395,9 @@ function rankSources(rows, locations = {}) {
     box.append(tr);
   }
 }
-function scans(rows, locations = {}) {
+function scans(rows, locations = {}, windowSeconds = 300) {
   const box = $("scan-list");
+  const scroll=box.scrollTop;
   updateScanSelection(rows);
   if (!rows.length) {
     empty(box, "当前范围未识别到符合阈值的扫描行为");
@@ -365,10 +410,11 @@ function scans(rows, locations = {}) {
     info.append(
       ipButton(r.src),
       locationNode(locations[r.src]),
-      node("p", `峰值窗口涉及 ${r.ports} 个端口 · 最后 ${clock(r.last)}`),
+      node("p", `${Math.round(windowSeconds/60)} 分钟窗口涉及 ${r.ports} 个端口`),
     );
     const actions = node("div", undefined, "scan-actions");
-    actions.append(node("span", format(r.n) + " 条"), scanSourceBlockButton(r.src));
+    const stamp=node("strong",window.ROSHome.relative(r.last),"scan-time");stamp.title=date(r.last);
+    actions.append(stamp,node("span", format(r.n) + " 条"), scanSourceBlockButton(r.src));
     wrap.append(
       scanSourceCheckbox(r.src),
       info,
@@ -376,6 +422,7 @@ function scans(rows, locations = {}) {
     );
     box.append(wrap);
   }
+  box.scrollTop=scroll;
 }
 function dl(id, items) {
   const box = $(id);
@@ -453,9 +500,15 @@ function status(s, coverage) {
   ]);
 }
 async function refreshEvents() {
+  if(eventRequest) eventRequest.abort();
+  const request=new AbortController();eventRequest=request;
   const p = params(true);
   if (cursor) p.set("before", cursor);
-  const result = await api("/api/events?" + p);
+  let result;
+  try{result=await api("/api/events?"+p,{signal:request.signal});}catch(error){if(error.name==="AbortError")return;throw error;}
+  if(request!==eventRequest||view!=="events")return;
+  const expanded=new Set([...document.querySelectorAll("#events-list .event-row[aria-expanded=true]")].map(row=>row.dataset.eventId));
+  const focused=document.activeElement.closest?.(".event-row")?.dataset.eventId;
   next = result.next;
   $("next-page").disabled = !next;
   $("first-page").disabled = !cursor;
@@ -467,7 +520,7 @@ async function refreshEvents() {
   if (!result.rows.length) {
     const tr = node("tr"),
       td = node("td", "暂无匹配记录，尝试调整筛选条件。", "empty");
-    td.colSpan = 7;
+    td.colSpan = 8;
     tr.append(td);
     box.append(tr);
     return;
@@ -475,7 +528,8 @@ async function refreshEvents() {
   for (const r of result.rows) {
     const tr = node("tr", undefined, "event-row");
     tr.tabIndex = 0;
-    tr.setAttribute("aria-expanded", "false");
+    tr.dataset.eventId=String(r.id);
+    tr.setAttribute("aria-expanded", String(expanded.has(String(r.id))));
     tr.setAttribute("aria-label", date(r.ts) + " " + r.src + "，展开原始日志");
     const source = node("td");
     source.append(
@@ -483,7 +537,7 @@ async function refreshEvents() {
       node("span", r.sport !== null ? " : " + r.sport : "", "muted"),
       locationNode(r.src_location),
     );
-    const scope = r.scope === "router" ? "路由器自身" : "内网映射";
+    const scope = r.scope === "router" ? "路由器自身" : r.direction === "inbound" ? "内网服务" : "转发通信";
     const badge = node("td");
     badge.append(
       node(
@@ -492,6 +546,8 @@ async function refreshEvents() {
         r.outcome === "blocked" ? "tag" : "tag neutral",
       ),
     );
+    const traffic=node("td");traffic.append(node("span",window.ROSHome.directions[r.direction] || "方向未确认","tag neutral"));
+    if(r.business)traffic.append(node("span",r.business,"business-tag"));
     tr.append(
       node("td", date(r.ts)),
       source,
@@ -499,11 +555,14 @@ async function refreshEvents() {
       node("td", r.proto),
       node("td", r.wan),
       node("td", scope),
+      traffic,
       badge,
     );
     const raw = node("tr", undefined, "raw-row hidden"),
-      rawCell = node("td", r.raw);
-    rawCell.colSpan = 7;
+      rawCell = node("td");
+    rawCell.append(window.ROSHome.eventActions(r),node("pre",r.raw));
+    rawCell.colSpan = 8;
+    if(expanded.has(String(r.id)))raw.classList.remove("hidden");
     raw.append(rawCell);
     const toggle = () => {
       raw.classList.toggle("hidden");
@@ -520,6 +579,7 @@ async function refreshEvents() {
       }
     });
     box.append(tr, raw);
+    if(focused===String(r.id))tr.focus({preventScroll:true});
   }
 }
 async function refresh() {
@@ -537,13 +597,11 @@ async function refresh() {
     $("metric-total").textContent = format(r.totals.observations);
     $("metric-sources").textContent = format(r.totals.sources);
     $("metric-ports").textContent = format(r.totals.ports);
-    $("metric-scans").textContent =
-      r.scans.length >= 20 ? "20+" : format(r.scans.length);
+    $("metric-scans").textContent = format(r.scan_count);
     trend(r.trend);
-    rankPorts(r.ports);
-    rankSources(r.sources, r.locations);
-    scans(r.scans, r.locations);
+    scans(r.scans, r.locations,r.status.scan_window);
     status(r.status, r.coverage);
+    window.ROSHome.render(r);
     summaryUpdatedAt = r.generated_at;
     updateFilterSummary();
     for (const w of r.wans)
@@ -564,53 +622,70 @@ async function refresh() {
 }
 document
   .querySelectorAll("[data-view]")
-  .forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+  .forEach((b) => b.addEventListener("click", () => showView(b.dataset.view,true)));
 for (const id of filterNames)
   $(id).addEventListener("change", () => {
     cursor = null;
+    writeLocation(true);
     refresh();
     if (view === "events") refreshEvents().catch((e) => fail(e.message));
   });
 $("refresh").addEventListener("click", () => {
   if (view === "logs") { refreshLogs(true); return; }
   if (view === "events") cursor = null;
+  writeLocation(false);
   refresh();
 });
 $("reset").addEventListener("click", () => {
-  for (const k of filterNames) $(k).value = k === "hours" ? "12" : "";
+  for (const k of filterNames) $(k).value = k === "hours" ? "12" : k === "direction" ? "inbound" : "";
   $("src").value = "";
   $("dport").value = "";
   cursor = null;
+  writeLocation(true);
   refresh();
 });
 $("search-form").addEventListener("submit", (e) => {
   e.preventDefault();
   cursor = null;
+  writeLocation(true);
   refreshEvents().catch((e) => fail(e.message));
 });
 $("clear-search").addEventListener("click", () => {
   $("src").value = "";
   $("dport").value = "";
   cursor = null;
+  writeLocation(true);
   refreshEvents().catch((e) => fail(e.message));
 });
 $("next-page").addEventListener("click", () => {
   cursor = next;
+  writeLocation(true);
   refreshEvents().catch((e) => fail(e.message));
 });
 $("first-page").addEventListener("click", () => {
   cursor = null;
+  writeLocation(true);
   refreshEvents().catch((e) => fail(e.message));
+});
+window.ROSHome.init();
+restoreLocation();
+$("auto-refresh").addEventListener("click",()=>{
+  autoRefresh=!autoRefresh;
+  $("auto-refresh").textContent=autoRefresh ? "暂停更新" : "恢复更新";
+  $("auto-refresh").setAttribute("aria-pressed",String(!autoRefresh));
+  $("auto-refresh").title=autoRefresh ? "暂停自动更新，方便阅读记录" : "自动更新已暂停，点击恢复";
+  if(autoRefresh)refresh();
 });
 window.addEventListener("DOMContentLoaded", () => {
   const initialView = window.location.hash.slice(1);
-  if (initialView) showView(initialView);
+  if (initialView) showView(initialView,false,true);
 });
-window.addEventListener("hashchange", () => showView(window.location.hash.slice(1)));
+window.addEventListener("hashchange", () => {restoreLocation();showView(window.location.hash.slice(1),false,true);});
+window.addEventListener("popstate",()=>{restoreLocation();showView(location.hash.slice(1),false,true);refresh();});
 refresh();
 setInterval(() => {
-  if (!document.hidden) refresh();
+  if (!document.hidden && autoRefresh) refresh();
 }, 10000);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) refresh();
+  if (!document.hidden && autoRefresh) refresh();
 });

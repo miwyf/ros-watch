@@ -32,23 +32,28 @@ async function refreshLogs(reset = false) {
     renderStorage(r.status.storage);
     const repeated = $("logs-repeated"); repeated.replaceChildren();
     for (const f of r.failures) repeated.append(node("p", "连续失败提示：" + f.source + " / " + f.username + "，同一 5 分钟固定窗口内 " + format(f.attempts) + " 次；最后 " + date(f.last), "notice danger"));
+    const expanded=new Set([...document.querySelectorAll("#logs-list .event-row")].filter(row=>row.querySelector('[aria-expanded="true"]')).map(row=>row.dataset.logId));
+    const focused=document.activeElement.closest?.("#logs-list .event-row")?.dataset.logId;
     const list = $("logs-list"); list.replaceChildren();
     if (!r.rows.length) {
       const row=node("tr"), cell=node("td","当前筛选没有记录。新接入不会补回 ROS 已覆盖的历史日志。","empty"); cell.colSpan=6;row.append(cell);list.append(row);
     }
     for (const l of r.rows) {
       const tr=node("tr",undefined,"event-row"), detail=node("tr",undefined,"raw-row hidden"), cell=node("td");cell.colSpan=6;
-      const button=node("button", l.message || "（空消息）", "text-button log-message");button.type="button";button.setAttribute("aria-expanded","false");
+      tr.dataset.logId=String(l.id);
+      if(expanded.has(String(l.id)))detail.classList.remove("hidden");
+      const button=node("button", l.message || "（空消息）", "text-button log-message");button.type="button";button.setAttribute("aria-expanded",String(expanded.has(String(l.id))));
       const toggle=()=>{detail.classList.toggle("hidden");button.setAttribute("aria-expanded",String(!detail.classList.contains("hidden")));};
       tr.append(node("td",date(l.ts)),node("td",l.device || l.sender),node("td",(logCategoryNames[l.category]||l.category)+" / "+(logSeverityNames[l.severity]||l.severity)),node("td",(l.username||"—")+" / "+(l.source||"未注明")),node("td",(logEventNames[l.event]||l.event)+(l.method?" / "+l.method:"")));
       const message=node("td");message.append(button);tr.append(message);tr.addEventListener("click",toggle);
       cell.append(node("div","发送设备："+l.sender+"；原设备时间："+(l.device_time||"未注明")+"；类别标记："+(l.topic||"未注明")),node("pre",l.raw));detail.append(cell);list.append(tr,detail);
+      if(focused===String(l.id))button.focus({preventScroll:true});
     }
   } catch (error) { if (error.name !== "AbortError") fail(error.message); }
   finally { if (logRequest === request) logRequest = null; }
 }
-$("logs-form").addEventListener("submit", e => { e.preventDefault(); refreshLogs(true); });
-for (const key of ["hours","category","severity","event"]) $("logs-"+key).addEventListener("change",()=>refreshLogs(true));
-$("logs-clear").addEventListener("click",()=>{for(const key of logFields) $("logs-"+key).value=key==="hours"?"12":"";refreshLogs(true);});
+$("logs-form").addEventListener("submit", e => { e.preventDefault(); writeLocation(true); refreshLogs(true); });
+for (const key of ["hours","category","severity","event"]) $("logs-"+key).addEventListener("change",()=>{writeLocation(true);refreshLogs(true);});
+$("logs-clear").addEventListener("click",()=>{for(const key of logFields) $("logs-"+key).value=key==="hours"?"12":"";writeLocation(true);refreshLogs(true);});
 $("logs-next").addEventListener("click",()=>{logCursor=logNext;refreshLogs();});
 $("logs-first").addEventListener("click",()=>refreshLogs(true));

@@ -11,7 +11,8 @@ CREATE INDEX IF NOT EXISTS logs_time ON logs(ts);
 CREATE INDEX IF NOT EXISTS logs_time_summary ON logs(ts,event,category,severity);
 CREATE INDEX IF NOT EXISTS logs_category_time ON logs(category,ts);
 CREATE INDEX IF NOT EXISTS logs_category_id ON logs(category,id);
-CREATE INDEX IF NOT EXISTS logs_login_source ON logs(source,username,ts) WHERE category='login';`
+CREATE INDEX IF NOT EXISTS logs_login_source ON logs(source,username,ts) WHERE category='login';
+CREATE INDEX IF NOT EXISTS logs_attention_time ON logs(ts) WHERE (category='config' OR event='reboot' OR severity IN ('warning','error','critical','alert','emergency')) AND NOT (category='login' AND event='failure');`
 
 type LogFilters struct {
 	Since, Until float64

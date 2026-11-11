@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"syscall"
 	"time"
@@ -158,19 +159,58 @@ func seedDemo(store *Store) error {
 		if event != nil {
 			batch = append(batch, *event)
 		}
-		if len(batch) == 250 {
-			if err := store.append(context.Background(), batch); err != nil {
-				return err
-			}
-			batch = batch[:0]
-		}
 	}
 	for i := 0; i < 32; i++ {
 		raw := fmt.Sprintf("RW-INPUT input: in:pppoe-out1 out:(none), proto TCP (SYN), 203.0.113.45:%d->192.0.2.1:%d, len 60", 50000+i, 1000+i)
-		if e := parseMessage([]byte(raw), "127.0.0.1", mapping, now-60); e != nil {
+		if e := parseMessage([]byte(raw), "127.0.0.1", mapping, now-1800); e != nil {
 			batch = append(batch, *e)
 		}
 	}
-	// Receipt ordering is not relevant for overview/demo ranking.
-	return store.append(context.Background(), batch)
+	// A recent, smaller scan must precede an older, busier source.
+	for i := 0; i < 16; i++ {
+		raw := fmt.Sprintf("RW-INPUT input: in:pppoe-out1 out:(none), proto TCP (SYN), 203.0.113.89:%d->192.0.2.1:%d, len 60", 51000+i, 2000+i)
+		if e := parseMessage([]byte(raw), "127.0.0.1", mapping, now-20); e != nil {
+			batch = append(batch, *e)
+		}
+	}
+	var mqtt Event
+	for i := 0; i < 1600; i++ {
+		raw := fmt.Sprintf("RW-FWD forward: in:pppoe-out2 out:bridge, proto TCP (SYN), 198.51.100.200:%d->192.0.2.50:1883, len 60", 44000+i)
+		if e := parseMessage([]byte(raw), "127.0.0.1", mapping, now-float64(i*16)); e != nil {
+			mqtt = *e
+			batch = append(batch, *e)
+		}
+	}
+	for i := 0; i < 60; i++ {
+		raw := fmt.Sprintf("forward: in:pppoe-out1 out:bridge, connection-state:established,snat proto TCP (ACK,PSH), 203.0.113.120:443->192.0.2.20:%d, len 80", 49000+i)
+		if e := parseMessage([]byte(raw), "127.0.0.1", mapping, now-float64(i*15)); e != nil {
+			batch = append(batch, *e)
+		}
+		raw = fmt.Sprintf("forward: in:pppoe-out1 out:bridge, proto UDP, 203.0.113.121:53->192.0.2.20:%d, len 80", 54000+i)
+		if e := parseMessage([]byte(raw), "127.0.0.1", mapping, now-float64(i*15)); e != nil {
+			batch = append(batch, *e)
+		}
+	}
+	for i := 0; i < 6; i++ {
+		ts := float64(int64(now/300)*300) + float64(i)
+		if ts > now {
+			ts = now
+		}
+		batch = append(batch, Event{Log: &LogEvent{TS: ts, Sender: "127.0.0.1", Device: "demo-router", Category: "login", Severity: "warning", Username: "demo-user", Source: "203.0.113.76", Method: "winbox", Event: "failure", Message: "演示：登录失败", Raw: "演示：连续登录失败合成记录"}})
+	}
+	batch = append(batch, Event{Log: &LogEvent{TS: now - 90, Sender: "127.0.0.1", Device: "demo-router", Category: "config", Severity: "info", Event: "change", Message: "演示：调整服务端口映射", Raw: "演示：配置变更合成记录"}})
+	sort.SliceStable(batch, func(i, j int) bool {
+		a, b := batch[i].TS, batch[j].TS
+		if batch[i].Log != nil {
+			a = batch[i].Log.TS
+		}
+		if batch[j].Log != nil {
+			b = batch[j].Log.TS
+		}
+		return a < b
+	})
+	if err := store.append(context.Background(), batch); err != nil {
+		return err
+	}
+	return store.saveBusiness(context.Background(), BusinessRule{Name: "演示 MQTT 上报", Sender: mqtt.Sender, Src: mqtt.Src, Dst: mqtt.Dst, Proto: mqtt.Proto, Dport: 1883, Scope: mqtt.Scope, Interface: mqtt.Interface})
 }
