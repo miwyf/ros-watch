@@ -1,0 +1,186 @@
+<section id="settings-view" class="view hidden">
+  <div class="settings-tabs" role="tablist" aria-label="系统设置分区">
+    <button id="settings-tab-connection" type="button" role="tab" data-settings-tab="connection" aria-controls="settings-panel-connection" aria-selected="true" tabindex="0">接入设置</button>
+    <button id="settings-tab-logs" type="button" role="tab" data-settings-tab="logs" aria-controls="settings-panel-logs" aria-selected="false" tabindex="-1">日志管理</button>
+    <button id="settings-tab-account" type="button" role="tab" data-settings-tab="account" aria-controls="settings-panel-account" aria-selected="false" tabindex="-1">账号安全</button>
+    <button id="settings-tab-notifications" type="button" role="tab" data-settings-tab="notifications" aria-controls="settings-panel-notifications" aria-selected="false" tabindex="-1">告警通知</button>
+    <button id="settings-tab-mqtt" type="button" role="tab" data-settings-tab="mqtt" aria-controls="settings-panel-mqtt" aria-selected="false" tabindex="-1">Home Assistant</button>
+  </div>
+  <section id="settings-panel-connection" role="tabpanel" aria-labelledby="settings-tab-connection" class="settings-panel">
+    <form id="connection-form" class="panel settings-form">
+      <div class="panel-heading"><h2>设备与接口</h2><div class="connection-actions"><span id="connection-result" role="status"></span><button id="connection-save" class="primary" type="submit">保存设置</button></div></div>
+      <div class="settings-fields">
+        <label>允许发送日志的设备<textarea id="set-allowed_senders" rows="2" maxlength="4096" placeholder="路由器的 IP 或网段，每行一个"></textarea><small>路由器发送日志的地址，留空暂停接收。</small></label>
+        <label>WAN 接口显示名称<textarea id="set-wan_map" rows="2" placeholder="pppoe-out1=电信&#10;pppoe-out2=联通" aria-describedby="wan-map-help"></textarea><small id="wan-map-help">每行：ROS 接口名=显示别名。左边须与 ROS 完全一致，右边自定义，不修改 ROS 接口名。</small></label>
+      </div>
+    </form>
+    {{template "routeros.html" .}}
+  </section>
+  <section id="settings-panel-logs" role="tabpanel" aria-labelledby="settings-tab-logs" class="settings-panel hidden">
+    <form id="runtime-form" class="panel settings-form">
+      <div class="panel-heading"><h2>日志管理</h2><span class="tag">即时生效</span></div>
+      <div class="settings-fields">
+        <label
+          >保留期限（天）<input
+            id="set-retention_days"
+            type="number"
+            min="1"
+            max="31"
+            required
+        /></label>
+        <label>最低可用磁盘空间（MB）<input id="set-min_free_mb" type="number" min="0" max="1048576" required><small>低于此值时执行下面选择的处理方式。</small></label>
+        <label>磁盘不足时处理方式<select id="set-disk_low_action"><option value="prune">自动清理最旧日志（默认）</option><option value="pause">暂停写入，保留现有日志</option></select></label>
+        <details class="full-field storage-summary">
+          <summary>日志存储状态 <span id="settings-storage-summary"></span></summary>
+          <dl id="settings-storage" class="status-list"></dl>
+        </details>
+        <p id="settings-storage-notice" class="inline-note full-field">正在读取空间状态…</p>
+        <p class="field-note full-field">原始日志和访问记录均按保留天数清理。实际可查时间取决于已接收到的日志；不再按条数或数据库预算清理；磁盘不足时，自动清理模式可能提前删除保留期内的最旧记录，并显示清理情况。</p>
+        <label
+          >接收处理上限（条/秒）<input
+            id="set-ingest_per_second"
+            type="number"
+            min="1"
+            max="5000"
+            required
+        /></label>
+        <label
+          >等待队列容量（条）<input
+            id="set-queue_size"
+            type="number"
+            min="1"
+            max="8192"
+            required
+        /></label>
+        <label
+          >扫描窗口（秒）<input
+            id="set-scan_window"
+            type="number"
+            min="60"
+            max="3600"
+            required
+        /></label>
+        <label
+          >疑似扫描的不同端口数<input
+            id="set-scan_ports"
+            type="number"
+            min="2"
+            max="1000"
+            required
+        /></label>
+        <label class="full-field"
+          >ROS 端日志采样情况<select id="set-sampling">
+            <option value="unknown">尚未确认是否限速</option>
+            <option value="limited">ROS 端已限速，按采样结果展示</option>
+            <option value="full">已确认 ROS 端未限速</option></select
+          ><small
+            >这里只标明统计口径，不会调整 ROS 配置；UDP 传输仍可能丢包。</small
+          ></label
+        >
+      </div>
+      <div class="settings-actions">
+        <button id="runtime-save" class="primary" type="submit">保存日志设置</button
+        ><span id="runtime-result" role="status"></span>
+      </div>
+    </form>
+  </section>
+  <section id="settings-panel-account" role="tabpanel" aria-labelledby="settings-tab-account" class="settings-panel hidden">
+<form id="account-form" class="panel settings-form">
+        <div class="panel-heading">
+          <div>
+            <h2>账号安全</h2>
+            <p>修改后，所有设备都需要重新登录。</p>
+          </div>
+        </div>
+        <div class="settings-fields single-column">
+          <label
+            >用户名<input
+              id="account-username"
+              autocomplete="username"
+              pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{2,31}"
+              minlength="3"
+              maxlength="32"
+              required
+            /><small>3–32 位字母、数字、点、下划线或短横线。</small></label
+          >
+          <label
+            >当前密码<input
+              id="account-current"
+              type="password"
+              autocomplete="current-password"
+              maxlength="128"
+              required
+          /></label>
+          <label
+            >新密码<input
+              id="account-new"
+              type="password"
+              autocomplete="new-password"
+              minlength="8"
+              maxlength="128"
+              placeholder="只修改用户名时可留空"
+            /><small>8–128 位，可使用便于记忆的长口令。</small></label
+          >
+          <label
+            >确认新密码<input
+              id="account-confirm"
+              type="password"
+              autocomplete="new-password"
+              maxlength="128"
+          /></label>
+        </div>
+        <div class="settings-actions">
+          <button class="primary" type="submit">更新账号</button
+          ><span id="account-result" role="status"></span>
+        </div>
+      </form>
+<article class="panel settings-help">
+        <h2>账号与设置保留在哪里？</h2>
+        <p>
+          账号、密码哈希和采集设置保存在持久数据卷中。后台修改后无需再改环境变量。
+        </p>
+        <p>
+          密码不会以明文存入数据库。忘记密码时，可通过服务器本地的恢复命令重设。
+        </p>
+        <p>访问端口由 Docker Compose 管理；本机地址无需在后台重复填写。</p>
+      </article>
+  </section>
+  <section id="settings-panel-notifications" role="tabpanel" aria-labelledby="settings-tab-notifications" class="settings-panel hidden">
+<form id="notification-form" class="panel settings-form">
+    <div class="panel-heading"><div><h2>告警通知</h2><p>重要异常推送到群机器人。</p></div><label class="notification-check"><input id="notify-enabled" type="checkbox">启用通知</label></div>
+    <div class="settings-fields">
+      <label>通知平台<select id="notify-platform"><option value="feishu">飞书</option><option value="wecom">企业微信</option><option value="dingtalk">钉钉</option></select></label>
+      <label>Webhook 地址<input id="notify-webhook" type="password" autocomplete="off" maxlength="2048" placeholder="粘贴群机器人 Webhook"><small id="notify-webhook-hint">保存后可测试发送。</small></label>
+      <label id="notify-secret-field">签名密钥<input id="notify-secret" type="password" autocomplete="off" maxlength="512" placeholder="机器人启用加签时填写"><small id="notify-secret-hint">与群机器人的安全设置保持一致。</small></label>
+      <label id="notify-clear-field" class="notification-check hidden"><input id="notify-clear-secret" type="checkbox">清除已保存的签名密钥</label>
+      <div class="full-field notification-options">
+        <label class="notification-check"><input id="notify-login_failures" type="checkbox">连续登录失败</label>
+        <label class="notification-check"><input id="notify-login_success" type="checkbox">非可信来源登录成功</label>
+        <label class="notification-check"><input id="notify-storage" type="checkbox">磁盘、接收与写入异常及恢复</label>
+        <label class="notification-check"><input id="notify-scans" type="checkbox">疑似端口扫描</label>
+      </div>
+      <label id="notify-trusted-field" class="full-field hidden">可信管理来源<textarea id="notify-trusted_admins" rows="2" maxlength="4096" placeholder="正常登录路由器的管理设备 IP 或网段，每行一个"></textarea><small>用于判断登录来源。它与“允许发送日志的设备”分别设置；日志没有明确来源时跳过登录来源判断。</small></label>
+      <p class="field-note full-field">连续失败按同一设备、来源和账号在 5 分钟固定窗口达到 5 次判断；扫描沿用日志规则阈值。同类同来源通知冷却 10 分钟，接收与存储只在异常状态变化时通知。通知在后台发送，默认关闭。</p>
+      <details class="full-field storage-summary"><summary>通知发送状态 <span id="notification-status-summary"></span></summary><dl id="notification-status" class="status-list"></dl><p class="inline-note">这里只显示本次运行的计数与状态。平台接受消息后，请在群内确认收到。</p></details>
+    </div>
+    <div class="settings-actions"><button class="primary" type="submit">保存通知设置</button><button id="notification-test" type="button">测试发送</button><span id="notification-result" role="status"></span></div>
+  </form>
+  </section>
+  <section id="settings-panel-mqtt" role="tabpanel" aria-labelledby="settings-tab-mqtt" class="settings-panel hidden">
+    <form id="mqtt-form" class="panel settings-form">
+      <div class="panel-heading"><div><h2>Home Assistant 接入</h2><p>通过 MQTT 自动发现，展示网络边界数据。</p></div><label class="notification-check"><input id="mqtt-enabled" type="checkbox">启用接入</label></div>
+      <div class="settings-fields">
+        <label>MQTT Broker<input id="mqtt-broker" maxlength="512" placeholder="tcp://主机地址:1883" autocomplete="off"><small>TLS 连接使用 ssl://主机地址:8883，并校验证书。</small></label>
+        <label>设备名称<input id="mqtt-device_name" maxlength="96" value="ROS Watch"><small>在 HA 中显示为一个设备。</small></label>
+        <label>用户名<input id="mqtt-username" maxlength="256" autocomplete="off"></label>
+        <label>密码<input id="mqtt-password" type="password" maxlength="1024" autocomplete="new-password"><small id="mqtt-password-hint">可留空，按 Broker 配置填写。</small></label>
+        <label id="mqtt-clear-field" class="notification-check full-field hidden"><input id="mqtt-clear-password" type="checkbox">清除已保存的密码</label>
+        <details class="full-field storage-summary"><summary>自动发现设置</summary><label>发现前缀<input id="mqtt-discovery_prefix" maxlength="128" value="homeassistant"><small>与 HA 的 MQTT 发现前缀一致，通常保持默认。</small></label><p class="inline-note">修改前缀或 Broker 后，旧 Broker 中的实体可能仍需在 HA 中手动移除。</p></details>
+        <p class="field-note full-field">最近 12 小时统计，每 60 秒发布一次。自动发现 11 个只读实体，含访问数量、来源、端口、疑似扫描、每分钟趋势及接收状态。排行作为属性发送，不上传原始日志。关闭接入后，实体保留并显示不可用。</p>
+        <details class="full-field storage-summary"><summary>接入状态 <span id="mqtt-status-summary">尚未加载</span></summary><dl id="mqtt-status" class="status-list"></dl></details>
+      </div>
+      <div class="settings-actions"><button class="primary" type="submit">保存接入设置</button><button id="mqtt-publish" type="button">立即发布</button><a class="outline-button" href="/api/mqtt/dashboard">下载 HA 看板</a><a class="text-button" href="/api/mqtt/dashboard?style=basic">下载简版</a><span id="mqtt-result" role="status"></span></div>
+    </form>
+    <article class="panel settings-help"><h2>在 HA 中查看</h2><p>保存并启用后，进入 HA 的“设置 → 设备与服务 → MQTT”，查看新发现的 ROS Watch 设备。Broker 确认发布成功后，仍需在 HA 中确认实体可用。</p><p>默认大屏版需要 button-card、ApexCharts 和 vertical-stack-in-card；未安装时可下载简版。下载看板后，在 HA 新建独立看板，将 YAML 粘贴到原始配置编辑器。若曾修改实体 ID，请同步调整 YAML 中的引用。曲线从 HA 接入后开始积累，不会自动补回此前 12 小时历史。</p></article>
+  </section>
+</section>

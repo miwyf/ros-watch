@@ -1,0 +1,27 @@
+<section id="logs-view" class="view hidden">
+  <div class="metric-grid">
+    <article class="metric"><div class="metric-label">日志记录</div><strong id="logs-total">—</strong><div class="metric-foot">当前筛选范围</div></article>
+    <article class="metric"><div class="metric-label">登录失败</div><strong id="logs-failures">—</strong><div class="metric-foot">已收到的失败事件</div></article>
+    <article class="metric"><div class="metric-label">登录成功</div><strong id="logs-successes">—</strong><div class="metric-foot">保留 REST / API 原始配对记录</div></article>
+    <article class="metric"><div class="metric-label">配置变更 / 警告错误</div><strong id="logs-changes">—</strong><div class="metric-foot">仅按日志分类，不判断恶意操作</div></article>
+  </div>
+  <article class="panel log-panel">
+    <div class="panel-heading"><div><h2>系统日志</h2><p>登录、变更、网络状态与原始记录</p></div><a id="logs-export" class="outline-button" href="/api/logs/export">导出 CSV</a></div>
+    <form id="logs-form" class="log-filters">
+      <label>时间范围<select id="logs-hours"><option value="1">最近 1 小时</option><option value="6">最近 6 小时</option><option value="12" selected>最近 12 小时</option><option value="24">最近 24 小时</option><option value="168">最近 7 天</option></select></label>
+      <label>日志类别<select id="logs-category"><option value="">全部日志</option><option value="login">登录审计</option><option value="config">配置变更</option><option value="network">接口 / 拨号</option><option value="script">脚本事件</option><option value="system">系统事件</option><option value="firewall">防火墙原文</option><option value="other">其他日志</option></select></label>
+      <label>严重级别<select id="logs-severity"><option value="">全部级别</option><option value="info">信息</option><option value="notice">通知</option><option value="warning">警告</option><option value="error">错误</option><option value="critical">严重</option><option value="alert">告警</option><option value="emergency">紧急</option><option value="unknown">未知</option></select></label>
+      <label>事件<select id="logs-event"><option value="">全部事件</option><option value="success">登录成功</option><option value="failure">登录失败</option><option value="logout">退出登录</option><option value="change">配置变更</option><option value="state">网络状态</option><option value="reboot">重启</option></select></label>
+      <label>设备名称<input id="logs-device" maxlength="256" placeholder="精确设备名"></label>
+      <label>账号<input id="logs-username" maxlength="256" placeholder="精确账号"></label>
+      <label>登录来源<input id="logs-source" maxlength="256" placeholder="精确 IPv4 / IPv6"></label>
+      <label>关键词<input id="logs-q" maxlength="256" placeholder="搜索完整原文"></label>
+      <button class="primary" type="submit">查询</button><button id="logs-clear" class="outline-button" type="button">清空筛选</button>
+    </form>
+    <p id="logs-coverage" class="inline-note">正在读取日志…</p>
+    <div id="logs-repeated" class="log-alerts"></div>
+    <p class="inline-note">点击记录展开完整原文。显示时间以服务器接收时间为准；原文中的设备时间另行保留。未注明登录来源时保持为空。配置变更记录不包含完整前后差异。</p>
+    <div class="table-scroll"><table class="events-table log-table"><thead><tr><th>接收时间</th><th>设备</th><th>类别 / 级别</th><th>账号 / 来源</th><th>事件 / 方式</th><th>消息</th></tr></thead><tbody id="logs-list"></tbody></table></div>
+    <div class="pagination"><span id="logs-page">每页最多 50 条</span><button id="logs-first" class="text-button">回到最新</button><button id="logs-next" class="outline-button" disabled>更早记录 ↓</button></div>
+  </article>
+</section>

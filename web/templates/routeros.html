@@ -1,0 +1,42 @@
+<article class="panel routeros-help" aria-labelledby="routeros-title">
+  <div class="panel-heading"><h2 id="routeros-title">RouterOS 接入</h2></div>
+  <div class="routeros-body">
+    <form id="routeros-form">
+      <div class="routeros-generator">
+        <label for="ros-server">日志服务器<input id="ros-server" name="server_address" inputmode="decimal" maxlength="64" placeholder="ROS 可访问的服务器 IPv4 地址" required autocomplete="off"></label>
+        <label for="ros-port">UDP 端口<input id="ros-port" name="syslog_port" type="number" min="1" max="65535" value="5514" required></label>
+      </div>
+      <div class="routeros-actions">
+        <button class="outline-button" type="button" data-ros-open="wan">WAN 接口配置</button>
+        <button class="primary" type="submit" data-ros-open="install">一键接入指令</button>
+        <button class="outline-button" type="button" data-ros-open="check">接入状态</button>
+        <button class="outline-button" type="button" data-ros-open="remove">撤销指令</button>
+        <button class="outline-button" type="button" data-ros-open="more">更多操作</button>
+      </div>
+    </form>
+    <p class="inline-note">实际外网接口（如 pppoe-out1、pppoe-out2）已加入 WAN 接口列表时，可跳过“WAN 接口配置”。</p>
+    <p id="ros-result" role="status"></p>
+  </div>
+</article>
+<dialog id="routeros-dialog" class="routeros-dialog" aria-labelledby="ros-dialog-title" aria-describedby="ros-dialog-note">
+  <div class="routeros-dialog-heading"><h2 id="ros-dialog-title"></h2><button id="ros-dialog-close" class="text-button" type="button" aria-label="关闭指令弹窗">关闭</button></div>
+  <p id="ros-dialog-note" class="inline-note"></p>
+  <div id="ros-command-view" class="hidden">
+    <textarea id="ros-script" class="routeros-code" rows="16" readonly spellcheck="false" aria-label="RouterOS 指令"></textarea>
+    <div class="routeros-copy-row"><button class="primary" type="button" data-ros-copy="ros-script">复制完整指令</button></div>
+  </div>
+  <div id="ros-wan-view" class="hidden">
+    <p id="ros-wan-result" role="status"></p>
+    <div class="routeros-code-heading"><h3>检查 WAN 成员</h3><button class="outline-button" type="button" data-ros-copy="ros-wan-check" disabled>复制检查指令</button></div>
+    <textarea id="ros-wan-check" class="routeros-code" rows="4" readonly spellcheck="false" aria-label="WAN 接口列表检查指令"></textarea>
+    <div class="routeros-code-heading"><h3>加入 WAN（已有成员自动跳过）</h3><button class="outline-button" type="button" data-ros-copy="ros-wan-example" disabled>复制添加指令</button></div>
+    <textarea id="ros-wan-example" class="routeros-code" rows="9" readonly spellcheck="false" aria-label="加入 WAN 接口列表指令"></textarea>
+    <p class="inline-note">使用等号左侧的接口名。加入 WAN 会影响引用该列表的防火墙等规则。</p>
+  </div>
+  <div id="ros-more-view" class="routeros-more hidden">
+    <button class="outline-button" type="button" data-ros-open="upgrade">仅补充系统日志</button>
+    <button class="outline-button" type="button" data-ros-open="remove_system">仅撤销系统日志</button>
+    <button id="ros-open-blocklist" class="outline-button" type="button">黑名单配置</button>
+  </div>
+  <p id="ros-copy-result" role="status"></p>
+</dialog>

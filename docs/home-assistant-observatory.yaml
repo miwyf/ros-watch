@@ -1,0 +1,278 @@
+# Requires button-card, apexcharts-card and vertical-stack-in-card.
+# Replace INSTANCE with your MQTT instance ID before importing.
+title: 网络边界观察
+views:
+  - title: 网络边界
+    path: ros-watch
+    icon: mdi:shield-eye
+    type: panel
+    cards:
+      - type: custom:button-card
+        show_name: false
+        show_icon: false
+        show_state: false
+        tap_action:
+          action: none
+        hold_action:
+          action: none
+        triggers_update:
+          - sensor.ros_watch_INSTANCE_access_records_12h
+          - sensor.ros_watch_INSTANCE_unique_sources_12h
+          - sensor.ros_watch_INSTANCE_target_ports_12h
+          - sensor.ros_watch_INSTANCE_scan_sources_12h
+          - sensor.ros_watch_INSTANCE_access_records_minute
+          - sensor.ros_watch_INSTANCE_receiver_state
+          - sensor.ros_watch_INSTANCE_last_received
+          - sensor.ros_watch_INSTANCE_updated_at
+          - sensor.ros_watch_INSTANCE_top_sources
+          - sensor.ros_watch_INSTANCE_top_ports
+          - binary_sensor.ros_watch_INSTANCE_receiver_problem
+        styles:
+          card:
+            - padding: 28px 32px 22px
+            - border: none
+            - border-radius: 0
+            - box-shadow: none
+            - min-height: calc(100vh - 56px)
+            - background: "radial-gradient(ellipse at 85% 0%, rgba(38,120,129,.14), transparent 38%), #090f1a"
+            - color: '#e4edf7'
+            - font-family: '"Segoe UI", "Microsoft YaHei", sans-serif'
+            - cursor: default
+            - '--ha-card-background': '#111c2b'
+            - '--ha-card-border-width': 0px
+            - '--ha-card-box-shadow': none
+            - '--primary-text-color': '#e4edf7'
+            - '--secondary-text-color': '#8396ac'
+            - '--divider-color': '#243247'
+          grid:
+            - grid-template-areas: '"hero hero" "metrics metrics" "chart status" "sources ports" "footer footer"'
+            - grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr)
+            - grid-template-rows: auto auto auto auto auto
+            - gap: 16px
+            - align-items: stretch
+          custom_fields:
+            hero:
+              - text-align: left
+              - white-space: normal
+            metrics:
+              - white-space: normal
+            chart:
+              - min-width: 0
+              - border: '1px solid #223149'
+              - border-radius: 18px
+              - overflow: hidden
+              - background: '#111c2b'
+            status:
+              - text-align: left
+              - white-space: normal
+            sources:
+              - text-align: left
+              - white-space: normal
+            ports:
+              - text-align: left
+              - white-space: normal
+            footer:
+              - text-align: left
+              - white-space: normal
+        extra_styles: |
+          * { box-sizing: border-box; }
+          .mono { font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
+          .hero { display:flex; justify-content:space-between; align-items:center; gap:20px; padding:3px 0 9px; }
+          .eyebrow { display:flex; align-items:center; gap:10px; color:#69dcc7; font:600 10px ui-monospace,Consolas,monospace; letter-spacing:2.3px; }
+          .brand-mark { width:27px; height:27px; border:1px solid #45d7ba50; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; background:#45d7ba10; }
+          .brand-mark ha-icon { width:17px; height:17px; }
+          .hero h1 { margin:10px 0 5px; font-size:31px; font-weight:650; letter-spacing:-.7px; line-height:1.25; }
+          .hero p { color:#8195ad; margin:0; font-size:12px; }
+          .chips { display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+          .chip { color:#a4b5c9; border:1px solid #26364c; background:#121d2c; border-radius:7px; padding:7px 10px; font-size:11px; }
+          .chip.demo { color:#e8b976; border-color:#e8b97640; background:#e8b9760d; }
+          .metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; }
+          .metric { position:relative; padding:19px 20px 17px; border-radius:17px; border:1px solid #233149; background:linear-gradient(130deg,#152132,#101a28); text-align:left; overflow:hidden; }
+          .metric:after { content:''; position:absolute; width:90px; height:90px; border-radius:50%; background:var(--tone); opacity:.045; filter:blur(12px); right:-30px; bottom:-40px; }
+          .metric-top { display:flex; justify-content:space-between; align-items:center; color:#9bacbf; font-size:12px; }
+          .metric-icon { display:flex; align-items:center; justify-content:center; height:29px; width:29px; border-radius:8px; background:color-mix(in srgb,var(--tone) 11%,transparent); color:var(--tone); }
+          .metric-icon ha-icon { height:17px; width:17px; }
+          .metric-value { margin:8px 0 4px; color:var(--tone); font-size:46px; font-weight:650; line-height:1.15; letter-spacing:-1.2px; }
+          .metric-caption { color:#71869f; font-size:10px; }
+          .panel { border:1px solid #233149; border-radius:18px; background:#111c2b; padding:21px 23px; height:100%; }
+          .panel-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:19px; }
+          .panel-title { color:#dce6f3; font-weight:600; font-size:15px; }
+          .panel-index { color:#617b98; font:10px ui-monospace,Consolas,monospace; letter-spacing:1px; }
+          .status-layout { display:flex; align-items:center; gap:21px; margin:11px 0 20px; }
+          .radar { flex-shrink:0; display:grid; place-items:center; width:93px; height:93px; border:1px solid #4be0bd42; border-radius:50%; background:radial-gradient(circle,#4be0bd11 29%,transparent 30%,transparent 49%,#4be0bd14 50%,transparent 52%,transparent 70%,#4be0bd15 71%); box-shadow:0 0 34px #4be0bd09; }
+          .radar ha-icon { height:33px; width:33px; color:#57dcbf; }
+          .status-title { color:#e1ebf7; font-size:24px; font-weight:600; letter-spacing:-.6px; margin-bottom:7px; }
+          .status-caption { color:#8396ad; font-size:11px; line-height:1.7; }
+          .status-row { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-top:1px solid #243247; font-size:11px; gap:10px; }
+          .status-row span { color:#8195ad; }
+          .status-row b { font-weight:500; color:#b9c9dc; }
+          .dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:7px; background:#54dabd; box-shadow:0 0 9px #54dabd50; }
+          .rank { display:grid; grid-template-columns:20px minmax(0,1fr) auto; align-items:center; gap:12px; margin-bottom:15px; }
+          .rank:last-child { margin-bottom:0; }
+          .rank-no { color:#5d7591; font:11px ui-monospace,Consolas,monospace; }
+          .rank-top { display:flex; align-items:center; gap:12px; margin-bottom:7px; min-width:0; }
+          .rank-name { font-size:12px; color:#d7e4f4; white-space:nowrap; }
+          .rank-place { color:#6e859f; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+          .bar { height:3px; width:100%; border-radius:5px; background:#1e3047; overflow:hidden; }
+          .bar i { display:block; height:100%; border-radius:5px; background:linear-gradient(90deg,#357c89,#65d9c5); }
+          .ports .bar i { background:linear-gradient(90deg,#365e9a,#70adf2); }
+          .rank-count { color:#b7c9de; min-width:36px; text-align:right; font-size:13px; }
+          .rank-count small { font:9px "Segoe UI",sans-serif; color:#607995; margin-left:4px; }
+          .empty { color:#7690ac; padding:38px 0; font-size:12px; }
+          .footer { display:flex; justify-content:space-between; gap:16px; align-items:center; color:#546b85; font-size:10px; padding:2px 2px 0; }
+          .footer .mono { letter-spacing:1.3px; color:#7890aa; }
+          @media(max-width:1000px) {
+            #container { grid-template-columns:minmax(0,1fr) !important; grid-template-areas:"hero" "metrics" "chart" "status" "sources" "ports" "footer" !important; }
+            .status-layout { margin:5px 0 14px; }
+          }
+          @media(max-width:650px) {
+            ha-card { padding:20px 15px !important; }
+            .hero { display:block; }
+            .hero h1 { font-size:27px; }
+            .chips { justify-content:flex-start; margin-top:15px; }
+            .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+            .metric { padding:15px; }
+            .metric-value { font-size:34px; }
+            .metric-top { font-size:11px; }
+            .panel { padding:19px; }
+            .rank { gap:9px; }
+            .rank-place { max-width:90px; }
+            .footer { display:block; line-height:1.9; }
+          }
+        custom_fields:
+          hero: |
+            [[[
+              const mode=states['sensor.ros_watch_INSTANCE_receiver_state']?.state;
+              return `<div class="hero"><div><div class="eyebrow"><span class="brand-mark"><ha-icon icon="mdi:shield-check"></ha-icon></span> ROS WATCH / NETWORK OBSERVATORY</div><h1>网络边界观察<span style="color:#56dbc0">.</span></h1><p>来源、端口与访问节奏，尽在眼前。</p></div><div class="chips"><span class="chip mono">WINDOW / 12H</span><span class="chip">每 60 秒同步</span>${mode==='演示数据'?'<span class="chip demo">演示数据</span>':''}</div></div>`;
+            ]]]
+          metrics: |
+            [[[
+              const items=[['access_records_12h','连接尝试','条已收到的访问记录','mdi:arrow-top-right','#76e1c2'],['unique_sources_12h','独立来源','个来源 IP 地址','mdi:ip-network-outline','#7eb6f4'],['target_ports_12h','目标端口','个日志中观察到的端口','mdi:ethernet','#a7a0f4'],['scan_sources_12h','疑似扫描','个来源 · 固定窗口识别','mdi:radar','#ecb56f']];
+              return `<div class="metric-grid">${items.map(([key,label,caption,icon,color])=>{const raw=states['sensor.ros_watch_INSTANCE_'+key]?.state;const n=Number(raw);const value=raw&&!['unknown','unavailable'].includes(raw)?Number.isFinite(n)?n.toLocaleString('zh-CN'):raw==='20+'?'20+':'—':'—';return `<div class="metric" style="--tone:${color}"><div class="metric-top">${label}<span class="metric-icon"><ha-icon icon="${icon}"></ha-icon></span></div><div class="metric-value mono">${value}</div><div class="metric-caption">${caption}</div></div>`;}).join('')}</div>`;
+            ]]]
+          chart:
+            card:
+              type: custom:vertical-stack-in-card
+              cards:
+                - type: custom:button-card
+                  show_icon: false
+                  name: 访问节奏
+                  label: 每分钟新增记录 · 最近 12 小时
+                  show_label: true
+                  tap_action:
+                    action: none
+                  styles:
+                    card:
+                      - padding: 20px 22px 0
+                      - border: none
+                      - border-radius: 0
+                      - background: transparent
+                      - box-shadow: none
+                    grid:
+                      - grid-template-areas: '"n" "l"'
+                    name:
+                      - justify-self: start
+                      - color: '#dce6f3'
+                      - font-size: 15px
+                      - font-weight: 600
+                    label:
+                      - justify-self: start
+                      - color: '#7188a3'
+                      - font-size: 10px
+                      - margin-top: 6px
+                - type: custom:apexcharts-card
+                  graph_span: 12h
+                  update_interval: 60sec
+                  header:
+                    show: false
+                  series:
+                    - entity: sensor.ros_watch_INSTANCE_access_records_minute
+                      name: 访问记录
+                      type: area
+                      color: '#66dec3'
+                      opacity: 0.16
+                      stroke_width: 2.5
+                      curve: straight
+                      extend_to: false
+                      float_precision: 0
+                      group_by:
+                        func: last
+                        duration: 1min
+                  apex_config:
+                    chart:
+                      height: 235
+                      background: transparent
+                      foreColor: '#7289a3'
+                      toolbar:
+                        show: false
+                      zoom:
+                        enabled: false
+                      fontFamily: Segoe UI, Microsoft YaHei, sans-serif
+                    theme:
+                      mode: dark
+                    grid:
+                      borderColor: '#253247'
+                      strokeDashArray: 4
+                      padding:
+                        left: 12
+                        right: 18
+                        bottom: 0
+                    legend:
+                      show: false
+                    dataLabels:
+                      enabled: false
+                    xaxis:
+                      axisBorder:
+                        show: false
+                      axisTicks:
+                        show: false
+                      labels:
+                        datetimeUTC: false
+                        style:
+                          fontSize: 10px
+                    yaxis:
+                      min: 0
+                      decimalsInFloat: 0
+                      tickAmount: 3
+                      labels:
+                        style:
+                          fontSize: 10px
+                    tooltip:
+                      theme: dark
+                    fill:
+                      type: gradient
+                      gradient:
+                        shadeIntensity: 0
+                        opacityFrom: 0.3
+                        opacityTo: 0.015
+                    markers:
+                      size: 0
+          status: |
+            [[[
+              const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+              const s=k=>states['sensor.ros_watch_INSTANCE_'+k]?.state;
+              const stamp=s('updated_at'), fresh=stamp&&!['unknown','unavailable'].includes(stamp)&&Date.now()-Date.parse(stamp)<180000;
+              const error=states['binary_sensor.ros_watch_INSTANCE_receiver_problem']?.state==='on';
+              const title=!fresh?'等待数据同步':error?'接收需要关注':'数据已同步';
+              const color=!fresh?'#8396ac':error?'#edb36d':'#65ddbf';
+              const time=v=>!v||['unknown','unavailable'].includes(v)?'尚无记录':new Date(v).toLocaleTimeString('zh-CN',{hour12:false});
+              return `<div class="panel"><div class="panel-head"><span class="panel-title">观察台状态</span><span class="panel-index">STATUS / 01</span></div><div class="status-layout"><div class="radar"><ha-icon icon="mdi:access-point-network"></ha-icon></div><div><div class="status-title" style="color:${color}">${title}</div><div class="status-caption">${s('receiver_state')==='演示数据'?'当前显示本地合成数据':'持续观察已收到的网络日志'}<br>自动同步 · 不自动封禁</div></div></div><div class="status-row"><span>接收与存储</span><b style="color:${color}"><i class="dot" style="background:${color}"></i>${!fresh?'状态未知':error?'异常':'正常'}</b></div><div class="status-row"><span>最近收到日志</span><b class="mono">${esc(time(s('last_received')))}</b></div><div class="status-row"><span>统计更新于</span><b class="mono">${esc(time(stamp))}</b></div></div>`;
+            ]]]
+          sources: |
+            [[[
+              const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+              const e=states['sensor.ros_watch_INSTANCE_top_sources']; const usable=e&&!['unknown','unavailable'].includes(e.state);
+              const rows=usable?(e.attributes.items||[]).slice(0,5):[]; const max=Math.max(1,...rows.map(r=>Number(r.count)||0));
+              return `<div class="panel"><div class="panel-head"><span class="panel-title">来源 IP 排行</span><span class="panel-index">TOP SOURCES / 05</span></div>${rows.length?rows.map((r,i)=>`<div class="rank"><span class="rank-no">${String(i+1).padStart(2,'0')}</span><div><div class="rank-top"><span class="rank-name mono">${esc(r.source)}</span><span class="rank-place">${esc(r.location)}</span></div><div class="bar"><i style="width:${Math.max(0,Math.min(100,Number(r.count)/max*100))}%"></i></div></div><div class="rank-count mono">${esc(Number(r.count).toLocaleString('zh-CN'))}<small>条</small></div></div>`).join(''):`<div class="empty">${usable?'当前窗口暂无来源记录':'等待来源数据同步'}</div>`}</div>`;
+            ]]]
+          ports: |
+            [[[
+              const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+              const e=states['sensor.ros_watch_INSTANCE_top_ports']; const usable=e&&!['unknown','unavailable'].includes(e.state);
+              const rows=usable?(e.attributes.items||[]).slice(0,5):[]; const max=Math.max(1,...rows.map(r=>Number(r.n)||0));
+              return `<div class="panel ports"><div class="panel-head"><span class="panel-title">目标端口排行</span><span class="panel-index">TOP PORTS / 05</span></div>${rows.length?rows.map((r,i)=>`<div class="rank"><span class="rank-no">${String(i+1).padStart(2,'0')}</span><div><div class="rank-top"><span class="rank-name mono">${esc(r.dport)} <span style="color:#5d7692">/</span> ${esc(r.proto)}</span></div><div class="bar"><i style="width:${Math.max(0,Math.min(100,Number(r.n)/max*100))}%"></i></div></div><div class="rank-count mono">${esc(Number(r.n).toLocaleString('zh-CN'))}<small>条</small></div></div>`).join(''):`<div class="empty">${usable?'当前窗口暂无端口记录':'等待端口数据同步'}</div>`}</div>`;
+            ]]]
+          footer: |
+            [[[
+              return '<div class="footer"><span>统计基于已收到的连接尝试 · 来源地区为出口归属地 · 不代表攻击成功</span><span class="mono">ROS WATCH / HOME ASSISTANT</span></div>';
+            ]]]

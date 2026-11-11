@@ -1,0 +1,32 @@
+services:
+  ros-watch:
+    image: ghcr.io/miwyf/ros-watch:latest
+    restart: unless-stopped
+    init: true
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+    ports:
+      - "8086:8080"
+      - "5514:5514/udp"
+    volumes:
+      - ros-watch-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 192m
+    cpus: 0.50
+    pids_limit: 64
+    stop_grace_period: 15s
+    logging:
+      driver: local
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+volumes:
+  ros-watch-data:

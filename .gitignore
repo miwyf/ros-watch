@@ -1,0 +1,12 @@
+.env
+data/
+*.db*
+*.sqlite*
+*.exe
+/ros-watch
+/probe
+*.test
+.playwright-cli/
+.ruff_cache/
+__pycache__/
+*.py[cod]

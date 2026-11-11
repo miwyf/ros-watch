@@ -1,0 +1,26 @@
+<section id="map-view" class="view hidden">
+  <article class="map-panel" aria-label="访问来源地图">
+    <div class="map-heading">
+      <p class="map-destination">来源地区 <span aria-hidden="true">→</span> <span id="map-target-name">我的 RouterOS</span></p>
+      <div class="map-tools"><div class="map-modes" role="group" aria-label="地图模式"><button type="button" id="map-flat" aria-pressed="true">平面地图</button><button type="button" id="map-globe" aria-pressed="false">3D 地球</button></div><button type="button" id="map-motion" class="outline-button" aria-pressed="false">暂停动画</button><button type="button" id="map-home" class="outline-button">回到所在地</button></div>
+    </div>
+    <div class="map-layout">
+      <div class="map-stage"><canvas id="access-map" tabindex="0" aria-label="访问来源地图；3D 模式可拖动旋转，方向键旋转，加减键缩放。详细统计见右侧地区列表。"></canvas><div id="map-message" class="map-message" role="status">正在加载地图…</div><div class="map-overlay"><span class="map-key"><i></i>访问尝试</span><span class="map-key blocked"><i></i>含拦截前记录</span><span class="map-key target"><i></i>RouterOS</span></div><div class="map-hint" id="map-hint">滚轮或 + / − 缩放 · 拖动平移</div></div>
+      <aside class="map-details"><div class="map-detail-heading"><span class="small-label">当前筛选范围</span><strong id="map-point-count">—</strong><p id="map-counts">等待访问记录</p></div><div id="map-region-list" class="map-region-list" aria-label="来源地区排行"></div><p class="inline-note" id="map-coverage"></p></aside>
+    </div>
+    <p class="inline-note map-explanation">连线循环展示所选范围内的访问方向，不表示实时数据包或连接成功；位置为出口地区的近似参考点。</p>
+  </article>
+  <details class="panel map-location">
+    <summary>RouterOS 所在地 <span id="map-location-summary">尚未设置</span></summary>
+    <form id="map-location-form">
+      <div class="map-place-row">
+        <label>国家/地区<select id="map-location-country"><option value="">正在加载…</option></select></label>
+        <label id="map-city-search-field" class="hidden">搜索城市<input id="map-city-search" type="search" placeholder="城市中文名或英文名" autocomplete="off"></label>
+        <label id="map-city-field" class="hidden">城市<select id="map-location-city"><option value="">请选择城市</option></select></label>
+        <button class="primary" type="submit">保存位置</button><button class="text-button" type="button" id="map-location-clear">清除位置</button>
+      </div>
+      <details id="map-manual-location" class="map-manual-location"><summary>手动设置名称与坐标 <span id="map-draft-coordinates"></span></summary><div class="map-location-form"><label>位置名称<input id="map-location-name" maxlength="60" value="我的 RouterOS"></label><label>经度<input id="map-longitude" type="number" step="any" min="-180" max="180" placeholder="例如 114.06"></label><label>纬度<input id="map-latitude" type="number" step="any" min="-90" max="90" placeholder="例如 22.55"></label></div></details>
+    </form>
+    <p id="map-location-status" class="inline-note" role="status"></p>
+  </details>
+</section>

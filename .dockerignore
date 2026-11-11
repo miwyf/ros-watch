@@ -1,0 +1,14 @@
+**
+!go.mod
+!go.sum
+!*.go
+!cmd
+!cmd/**
+!web
+!web/**
+!geo
+!geo/**
+!routeros
+!routeros/**
+!docs
+!docs/home-assistant-observatory.yaml

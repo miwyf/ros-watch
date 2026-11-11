@@ -1,0 +1,28 @@
+{
+# Copy the entire block, including braces, into the terminal in one paste.
+# Add normal system logs to an existing ROSWatch installation; safe to repeat.
+# Existing firewall logging and policy are preserved. Debug/packet logs are excluded.
+:local base [/system logging action find where name="ROSWatch"]
+:if ([:len $base] = 0) do={ :error "ROSWatch is missing; run the full installation first" }
+:if ([:len [/system logging action find where name="ROSWatchSystem"]] = 0) do={
+  /system logging action add name=ROSWatchSystem target=remote remote=[/system logging action get $base remote] remote-port=[/system logging action get $base remote-port] src-address=[/system logging action get $base src-address] remote-log-format=syslog syslog-facility=local6 syslog-severity=auto
+}
+:if ([:len [/system logging find where action="ROSWatchSystem" and prefix="RW-SYS-SYSTEM "]] = 0) do={
+  /system logging add action=ROSWatchSystem topics=system,!debug,!packet prefix="RW-SYS-SYSTEM "
+}
+:if ([:len [/system logging find where action="ROSWatchSystem" and prefix="RW-SYS-INTERFACE "]] = 0) do={
+  /system logging add action=ROSWatchSystem topics=interface,!system,!debug,!packet prefix="RW-SYS-INTERFACE "
+}
+:if ([:len [/system logging find where action="ROSWatchSystem" and prefix="RW-SYS-PPP "]] = 0) do={
+  /system logging add action=ROSWatchSystem topics=ppp,!system,!interface,!debug,!packet prefix="RW-SYS-PPP "
+}
+:if ([:len [/system logging find where action="ROSWatchSystem" and prefix="RW-SYS-PPPOE "]] = 0) do={
+  /system logging add action=ROSWatchSystem topics=pppoe,!system,!interface,!ppp,!debug,!packet prefix="RW-SYS-PPPOE "
+}
+:if ([:len [/system logging find where action="ROSWatchSystem" and prefix="RW-SYS-SCRIPT "]] = 0) do={
+  /system logging add action=ROSWatchSystem topics=script,!system,!interface,!ppp,!pppoe,!debug,!packet prefix="RW-SYS-SCRIPT "
+}
+:if ([:len [/system logging find where action="ROSWatchSystem" and prefix="RW-SYS-OTHER "]] = 0) do={
+  /system logging add action=ROSWatchSystem topics=!firewall,!system,!interface,!ppp,!pppoe,!script,!debug,!packet prefix="RW-SYS-OTHER "
+}
+}
