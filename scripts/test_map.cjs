@@ -9,6 +9,56 @@ const helpers = vm.runInContext("ROSMapData", context);
 const places = JSON.parse(fs.readFileSync(path.join(__dirname, "../web/static/map-places.json"), "utf8"));
 const index = helpers.cityIndex(places);
 
+test("comet tails stay behind the head and never wrap onto the next route", () => {
+  assert.equal(helpers.cometTrail(0).length,0);
+  for (const phase of [0.001,0.03,0.5,0.999,1]) {
+    const tail=helpers.cometTrail(phase);
+    assert.ok(tail.length>0 && tail.length<=8);
+    for (const [start,end,opacity] of tail) {
+      assert.ok(start>=0 && end>start && end<=phase);
+      assert.ok(opacity>0 && opacity<=1);
+    }
+    assert.equal(tail.at(-1)[1],phase);
+  }
+});
+
+test("threat bursts require a new high source, added records or an increased level", () => {
+  const point=(key,n,rank)=>({key,n,threat:{rank}});
+  const before=[point("same",20,2),point("more",20,2),point("rising",20,1),point("lower",30,3)];
+  const next=[point("same",20,2),point("more",21,2),point("rising",20,2),point("lower",29,2),point("new-high",5,3),point("new-low",500,0)];
+  assert.deepEqual(Array.from(helpers.threatBursts(before,next)),["more","rising","new-high"]);
+});
+
+test("threat colors follow the configured threshold without treating block counts as severity", () => {
+  for (const [ports, key] of [[0,"low"],[7,"low"],[8,"medium"],[14,"medium"],[15,"high"],[44,"high"],[45,"critical"]]) {
+    assert.equal(helpers.threat(ports,15).key,key, String(ports));
+  }
+  assert.equal(helpers.threat(1,2).key,"low");
+  assert.equal(helpers.threat(2,2).key,"high");
+  assert.equal(helpers.threat(6,2).key,"critical");
+  for (const [ports,threshold] of [[undefined,15],[0,undefined],[-1,15],[2.5,15],[Infinity,15],[20,0]]) {
+    assert.equal(helpers.threat(ports,threshold).key,"unknown");
+  }
+  assert.equal(new Set([0,8,15,45].map(ports=>helpers.threat(ports,15).color)).size,4);
+});
+
+test("a merged region keeps the worst source peak instead of adding unrelated sources", () => {
+  const locations = Object.fromEntries(["a","b","c"].map(src=>[src,{kind:"located",country_code:"CN",city:"Shenzhen"}]));
+  const rows = [{src:"a",n:10000,blocked:10000,peak_ports:1},{src:"b",n:8,blocked:0,peak_ports:8},{src:"c",n:7,blocked:0,peak_ports:7}];
+  let result=helpers.aggregate(rows,locations,places,index,15);
+  assert.equal(result.points.length,1);
+  assert.equal(result.points[0].threat.key,"medium");
+  assert.equal(result.points[0].peakPorts,8);
+  rows[2].peak_ports=45;
+  result=helpers.aggregate(rows,locations,places,index,15);
+  assert.equal(result.points[0].threat.key,"critical");
+  assert.equal(result.points[0].peakPorts,45);
+  delete rows[2].peak_ports; delete rows[1].peak_ports; delete rows[0].peak_ports;
+  result=helpers.aggregate(rows,locations,places,index,15);
+  assert.equal(result.points[0].threat.key,"unknown");
+  assert.equal(result.points[0].peakPorts,null);
+});
+
 test("matches Chinese city names and English names within the correct country", () => {
   const result = helpers.aggregate([{ src: "a", n: 4, blocked: 2 }, { src: "b", n: 3, blocked: 0 }], {
     a: { kind: "located", country_code: "CN", city: "深圳市" },

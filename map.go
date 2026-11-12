@@ -90,8 +90,22 @@ func (a *App) accessMap(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := boundedContext(r.Context())
 	defer cancel()
 	where, args := f.where()
-	args = append(args, mapSourceLimit+1)
-	rows, err := queryMaps(ctx, a.store.reader, "SELECT src,COUNT(*) n,SUM(outcome='blocked') blocked FROM events WHERE "+where+" GROUP BY src ORDER BY n DESC,src LIMIT ?", args...)
+	settings := a.settings.Load()
+	queryArgs := append([]any{}, args...)
+	queryArgs = append(queryArgs, mapSourceLimit+1, settings.ScanWindow)
+	queryArgs = append(queryArgs, args...)
+	// Keep the same per-device fixed windows as scan detection. A busy service,
+	// replies, or many unrelated sources in one region must not become a scan.
+	rows, err := queryMaps(ctx, a.store.reader, `WITH selected AS (
+ SELECT src,COUNT(*) n,SUM(outcome='blocked') blocked FROM events WHERE `+where+` GROUP BY src ORDER BY n DESC,src LIMIT ?
+), peaks AS (
+ SELECT src,MAX(ports) peak_ports FROM (
+  SELECT sender,src,CAST(ts / ? AS INTEGER) window,COUNT(DISTINCT dport) ports FROM events
+  WHERE `+where+` AND src IN (SELECT src FROM selected) AND direction='inbound' AND dport IS NOT NULL AND NOT `+businessExistsSQL+`
+  GROUP BY sender,src,window
+ ) GROUP BY src
+)
+SELECT selected.*,COALESCE(peaks.peak_ports,0) peak_ports FROM selected LEFT JOIN peaks USING(src) ORDER BY n DESC,src`, queryArgs...)
 	if err != nil {
 		queryError(w)
 		return
@@ -116,5 +130,5 @@ func (a *App) accessMap(w http.ResponseWriter, r *http.Request) {
 			locations[row["src"].(string)] = location
 		}
 	}
-	jsonResponse(w, 200, map[string]any{"sources": rows, "locations": locations, "demo": a.config.Demo, "truncated": truncated, "source_limit": mapSourceLimit, "generated_at": unixNow()})
+	jsonResponse(w, 200, map[string]any{"sources": rows, "locations": locations, "scan_ports": settings.ScanPorts, "scan_window": settings.ScanWindow, "demo": a.config.Demo, "truncated": truncated, "source_limit": mapSourceLimit, "generated_at": unixNow()})
 }

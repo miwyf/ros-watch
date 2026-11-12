@@ -8,6 +8,8 @@ window.ROSMap = (() => {
   let projection, world, places, cities, resources, target, settingsLoaded = false;
   let data = { points: [], mapped: 0, excluded: 0 }, routes = [], frame = 0, lastFrame = 0;
   let pointer = null, hovered = null, hits = [], sequence = 0;
+  const mapView = $("map-view"), bursts = new Map();
+  let lastDataset = null, presenting = false, nativePresentation = false, clockTimer = 0;
 
   function script(src) {
     return new Promise((resolve, reject) => {
@@ -100,8 +102,9 @@ window.ROSMap = (() => {
     for (const point of data.points) {
       const button = node("button", undefined, "map-region"); button.type = "button";
       button.append(node("span", point.label), node("strong", format(point.n)));
-      button.append(node("small", point.level + " · " + point.sources.length + " 个 IP"));
-      button.title = point.label + "：" + point.n + " 条记录，含 " + point.blocked + " 条拦截前记录；点击定位";
+      button.style.setProperty("--map-threat", point.threat.color);
+      button.append(node("small", point.level + " · " + point.sources.length + " 个 IP · " + point.threat.label));
+      button.title = point.label + "：" + point.n + " 条记录，含 " + point.blocked + " 条拦截前记录；" + point.threat.label + (point.peakPorts == null ? "" : "，单来源固定窗口最多 " + point.peakPorts + " 个未标记业务端口") + "；点击定位";
       button.addEventListener("click", () => {
         if (mode === "globe") rotation = [-point.point[0], -point.point[1], 0];
         else { rotation = [-point.point[0], 0, 0]; pan = [0, 0]; }
@@ -110,19 +113,46 @@ window.ROSMap = (() => {
       list.append(button);
     }
     if (!data.points.length) list.append(node("p", "暂无可定位来源", "empty"));
+    $("map-display-target").textContent = target?.name || "尚未设置所在地";
+    $("map-display-range").textContent = $("hours").selectedOptions[0].textContent;
+    $("map-display-sources").textContent = format(data.points.length);
+    $("map-display-records").textContent = format(data.mapped);
+    $("map-display-updated").textContent = "记录更新于 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    const levels = $("map-display-levels"); levels.replaceChildren();
+    for (const key of ["critical", "high", "medium", "low", "unknown"]) {
+      const items = data.points.filter(point => point.threat.key === key);
+      const risk = items[0]?.threat;
+      if (!risk) continue;
+      const item = node("span", undefined, "map-display-level");
+      item.style.setProperty("--map-threat", risk.color);
+      item.append(node("i"), node("b", format(items.length)), node("small", risk.label));
+      levels.append(item);
+    }
     updateMessage();
   }
   async function refresh() {
     const request = ++sequence;
+    const query = params().toString();
     try {
       const [result, value] = await Promise.all([
-        api("/api/map?" + params()),
+        api("/api/map?" + query),
         settingsLoaded ? Promise.resolve(null) : api("/api/map/settings"),
         load(),
       ]);
       if (request !== sequence || !visible) return;
       if (value) { settingsLoaded = true; applyTarget(value); }
-      data = ROSMapData.aggregate(result.sources, result.locations, places, cities);
+      const next = ROSMapData.aggregate(result.sources, result.locations, places, cities, result.scan_ports);
+      const dataset = query + "|" + result.scan_ports + "|" + result.scan_window;
+      const now = performance.now();
+      if (dataset === lastDataset) {
+        for (const key of ROSMapData.threatBursts(data.points, next.points)) bursts.set(key, now + 4000);
+      } else bursts.clear();
+      for (const [key, until] of bursts) if (until < now || !next.points.some(point => point.key === key)) bursts.delete(key);
+      lastDataset = dataset;
+      data = next;
+      $("map-threat-rule").textContent = Number.isInteger(result.scan_ports) && result.scan_ports >= 2 && Number.isInteger(result.scan_window) && result.scan_window > 0
+        ? "分级依据：同一设备、同一来源每 " + result.scan_window + " 秒固定窗口，未标记业务的外部新连接目标端口数 ≥ " + Math.max(2, Math.ceil(result.scan_ports / 2)) + " 需关注，≥ " + result.scan_ports + " 疑似扫描，≥ " + result.scan_ports * 3 + " 高强度扫描。同地区取最高等级，不累加不同 IP。一般等级不等于确认安全。"
+        : "当前数据缺少扫描分级依据，来源显示为等级未知。";
       hovered = null;
       buildRoutes(); renderDetails(result.truncated, result.source_limit);
       dirty = true; resize(); wake();
@@ -150,6 +180,10 @@ window.ROSMap = (() => {
     const sky = base.createRadialGradient(width * 0.48, height * 0.45, 20, width / 2, height / 2, width * 0.7);
     sky.addColorStop(0, "#122c3d"); sky.addColorStop(1, "#080f19"); base.fillStyle = sky; base.fillRect(0, 0, width, height);
     if (mode === "globe") {
+      for (let i = 0; i < 110; i++) {
+        base.fillStyle = "rgba(173,211,232," + (0.18 + i % 5 * 0.09) + ")";
+        base.beginPath(); base.arc(width * ((i * 73 + 19) % 997) / 997, height * ((i * 137 + 53) % 991) / 991, 0.45 + i % 3 * 0.3, 0, Math.PI * 2); base.fill();
+      }
       base.beginPath(); path({ type: "Sphere" }); base.fillStyle = "#0c1e2b"; base.fill();
       base.strokeStyle = "#25516a"; base.lineWidth = 1; base.stroke();
     }
@@ -162,6 +196,9 @@ window.ROSMap = (() => {
       const shade = base.createRadialGradient(cx - radius * 0.4, cy - radius * 0.5, radius * 0.1, cx, cy, radius);
       shade.addColorStop(0, "#9ad8ed0d"); shade.addColorStop(0.75, "#00000000"); shade.addColorStop(1, "#000710a0");
       base.beginPath(); path({ type: "Sphere" }); base.fillStyle = shade; base.fill();
+      const atmosphere = base.createRadialGradient(cx, cy, radius * 0.97, cx, cy, radius * 1.13);
+      atmosphere.addColorStop(0, "#64cfde00"); atmosphere.addColorStop(0.2, "#72d9f05e"); atmosphere.addColorStop(0.48, "#64cfde1a"); atmosphere.addColorStop(1, "#64cfde00");
+      base.beginPath(); base.arc(cx, cy, radius * 1.13, 0, Math.PI * 2); base.fillStyle = atmosphere; base.fill();
     }
     dirty = false;
   }
@@ -169,13 +206,28 @@ window.ROSMap = (() => {
     if (mode === "flat") return true;
     return d3.geoDistance(point, [-rotation[0], -rotation[1]]) < Math.PI / 2 - 0.005;
   }
-  function dot(point, color, radius, pulse = 0) {
+  function dot(point, color, radius, pulse = 0, pulseRadius = 12) {
     if (!front(point)) return;
     const p = projection(point);
     context.fillStyle = color; context.shadowColor = color; context.shadowBlur = 10;
     context.beginPath(); context.arc(p[0], p[1], radius, 0, Math.PI * 2); context.fill(); context.shadowBlur = 0;
-    if (pulse) { context.strokeStyle = color; context.globalAlpha = 1 - pulse; context.beginPath(); context.arc(p[0], p[1], radius + pulse * 12, 0, Math.PI * 2); context.stroke(); context.globalAlpha = 1; }
+    if (pulse) { context.save(); context.strokeStyle = color; context.lineWidth = 1.3; context.globalAlpha = (1 - pulse) * 0.8; context.beginPath(); context.arc(p[0], p[1], radius + pulse * pulseRadius, 0, Math.PI * 2); context.stroke(); context.restore(); }
     return p;
+  }
+  function comet(path, interpolate, phase, color, dimmed) {
+    context.save(); context.strokeStyle = color; context.lineCap = "round";
+    context.globalCompositeOperation = "lighter";
+    for (const [start, end, strength] of ROSMapData.cometTrail(phase)) {
+      context.beginPath(); path({ type: "LineString", coordinates: [interpolate(start), interpolate(end)] });
+      context.globalAlpha = strength * (dimmed ? 0.2 : 0.85); context.lineWidth = 0.8 + strength * 2.2; context.stroke();
+    }
+    context.restore();
+    dot(interpolate(phase), color, dimmed ? 1.8 : 3);
+  }
+  function sourceDot(point, time, index) {
+    const burst = !paused && (bursts.get(point.key) || 0) > time;
+    const pulse = paused || point.threat.rank < 2 ? 0 : (time / (burst ? 850 : point.threat.rank === 3 ? 2100 : 2900) + index * 0.19) % 1;
+    return dot(point.point, point.threat.color, Math.min(5.5, 2.1 + Math.log10(point.n + 1) * 0.65) + (burst ? 1 : 0), pulse, burst ? 32 : 20);
   }
   function draw(time) {
     if (!projection || dirty) drawBase();
@@ -184,17 +236,17 @@ window.ROSMap = (() => {
     hits = [];
     for (let i = 0; i < routes.length; i++) {
       const { point, interpolate, coordinates } = routes[i];
-      const color = point.blocked ? "#f4bc74" : "#64cfde";
+      const color = point.threat.color;
       context.beginPath(); path({ type: "LineString", coordinates });
       context.strokeStyle = color; context.globalAlpha = hovered && hovered !== point ? 0.12 : 0.38; context.lineWidth = Math.min(2.4, 0.8 + Math.log10(point.n + 1) * 0.35); context.stroke(); context.globalAlpha = 1;
       const phase = paused ? 0.65 : (time / 3300 + i * 0.173) % 1;
-      const p = dot(point.point, color, Math.min(5.5, 2.1 + Math.log10(point.n + 1) * 0.65));
+      const p = sourceDot(point, time, i);
       if (p) hits.push({ point, x: p[0], y: p[1] });
-      dot(interpolate(phase), color, 2.5);
+      comet(path, interpolate, phase, color, hovered && hovered !== point);
     }
     // Origins remain visible before a destination has been configured.
-    if (!configured()) for (const point of data.points) {
-      const p = dot(point.point, "#64cfde", 3);
+    if (!configured()) for (const [i, point] of data.points.entries()) {
+      const p = sourceDot(point, time, i);
       if (p) hits.push({ point, x: p[0], y: p[1] });
     }
     if (configured()) {
@@ -208,7 +260,7 @@ window.ROSMap = (() => {
     if (hovered) {
       const hit = hits.find(h => h.point === hovered);
       if (hit) {
-        const label = hovered.label + " · " + format(hovered.n) + " 条 · " + hovered.level;
+        const label = hovered.label + " · " + format(hovered.n) + " 条 · " + hovered.threat.label;
         context.font = '12px "Microsoft YaHei",sans-serif';
         const box = Math.min(width - 24, context.measureText(label).width + 24);
         const x = Math.max(12, Math.min(width - box - 12, hit.x - box / 2));
@@ -229,7 +281,7 @@ window.ROSMap = (() => {
     visible = value;
     if (frame) cancelAnimationFrame(frame);
     frame = 0;
-    if (!value) { sequence++; return; }
+    if (!value) { if (presenting) setPresentation(false); sequence++; return; }
     resize(); wake();
   }
   for (const name of ["flat", "globe"]) $("map-" + name).addEventListener("click", () => {
@@ -243,6 +295,37 @@ window.ROSMap = (() => {
   $("map-motion").addEventListener("click", () => { paused = !paused; updateMotion(); wake(); });
   reducedMotion.addEventListener("change", event => { if (event.matches) { paused = true; updateMotion(); wake(); } });
   updateMotion();
+  function displayClock() {
+    if (!document.hidden) $("map-display-clock").textContent = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  }
+  function setPresentation(value) {
+    presenting = value;
+    mapView.classList.toggle("map-presenting", value);
+    $("map-display").setAttribute("aria-pressed", String(value));
+    $("map-display").textContent = value ? "退出展示" : "全屏展示";
+    clearInterval(clockTimer); clockTimer = 0;
+    if (value) { displayClock(); clockTimer = setInterval(displayClock, 1000); canvas.focus({ preventScroll: true }); }
+    else {
+      if (document.fullscreenElement === mapView) document.exitFullscreen().catch(() => {});
+      if (visible) $("map-display").focus({ preventScroll: true });
+    }
+    dirty = true; resize(); wake();
+  }
+  $("map-display").addEventListener("click", async () => {
+    if (presenting) { setPresentation(false); return; }
+    setPresentation(true);
+    // Keep the same in-page display mode if native fullscreen is unavailable.
+    try {
+      if (mapView.requestFullscreen) await mapView.requestFullscreen();
+      if (!presenting && document.fullscreenElement === mapView) await document.exitFullscreen();
+    } catch (_) {}
+  });
+  $("map-exit-display").addEventListener("click", () => setPresentation(false));
+  document.addEventListener("fullscreenchange", () => {
+    if (document.fullscreenElement === mapView) nativePresentation = true;
+    else if (nativePresentation) { nativePresentation = false; setPresentation(false); }
+  });
+  document.addEventListener("keydown", event => { if (event.key === "Escape" && presenting) { event.preventDefault(); setPresentation(false); } });
   $("map-home").addEventListener("click", () => {
     zoom = 1; pan = [0, 0]; rotation = configured() ? [-target.longitude, mode === "globe" ? -target.latitude : 0, 0] : [-10, 0, 0]; dirty = true; hovered = null; wake();
   });

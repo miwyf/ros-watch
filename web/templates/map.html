@@ -1,14 +1,21 @@
 <section id="map-view" class="view hidden">
   <article class="map-panel" aria-label="访问来源地图">
+    <div class="map-display-hud">
+      <div class="map-display-brand"><span>ROS WATCH / NETWORK OBSERVATORY</span><h2>网络边界态势</h2><p><span id="map-display-target">我的 RouterOS</span><span aria-hidden="true"> · </span><span id="map-display-range"></span></p></div>
+      <div class="map-display-metrics"><div><strong id="map-display-sources">—</strong><small>来源地区</small></div><div><strong id="map-display-records">—</strong><small>可定位记录</small></div></div>
+      <div id="map-display-levels" class="map-display-levels" aria-label="来源地区关注等级分布"></div>
+      <div class="map-display-actions"><time id="map-display-clock" aria-live="off"></time><small id="map-display-updated"></small><button type="button" id="map-exit-display" class="outline-button">退出展示 <span aria-hidden="true">Esc</span></button></div>
+    </div>
     <div class="map-heading">
       <p class="map-destination">来源地区 <span aria-hidden="true">→</span> <span id="map-target-name">我的 RouterOS</span></p>
-      <div class="map-tools"><div class="map-modes" role="group" aria-label="地图模式"><button type="button" id="map-flat" aria-pressed="true">平面地图</button><button type="button" id="map-globe" aria-pressed="false">3D 地球</button></div><button type="button" id="map-motion" class="outline-button" aria-pressed="false">暂停动画</button><button type="button" id="map-home" class="outline-button">回到所在地</button></div>
+      <div class="map-tools"><div class="map-modes" role="group" aria-label="地图模式"><button type="button" id="map-flat" aria-pressed="true">平面地图</button><button type="button" id="map-globe" aria-pressed="false">3D 地球</button></div><button type="button" id="map-motion" class="outline-button" aria-pressed="false">暂停动画</button><button type="button" id="map-home" class="outline-button">回到所在地</button><button type="button" id="map-display" class="outline-button" aria-pressed="false" aria-controls="map-view">全屏展示</button></div>
     </div>
     <div class="map-layout">
-      <div class="map-stage"><canvas id="access-map" tabindex="0" aria-label="访问来源地图；3D 模式可拖动旋转，方向键旋转，加减键缩放。详细统计见右侧地区列表。"></canvas><div id="map-message" class="map-message" role="status">正在加载地图…</div><div class="map-overlay"><span class="map-key"><i></i>访问尝试</span><span class="map-key blocked"><i></i>含拦截前记录</span><span class="map-key target"><i></i>RouterOS</span></div><div class="map-hint" id="map-hint">滚轮或 + / − 缩放 · 拖动平移</div></div>
+      <div class="map-stage"><canvas id="access-map" tabindex="0" aria-label="访问来源地图；线条颜色表示观测关注等级。3D 模式可拖动旋转，方向键旋转，加减键缩放。详细统计见右侧地区列表。"></canvas><div id="map-message" class="map-message" role="status">正在加载地图…</div><div class="map-overlay"><span class="map-key"><i></i>一般</span><span class="map-key medium"><i></i>需关注</span><span class="map-key high"><i></i>疑似扫描</span><span class="map-key critical"><i></i>高强度扫描</span><span class="map-key unknown"><i></i>等级未知</span><span class="map-key target"><i></i>RouterOS</span></div><div class="map-hint" id="map-hint">滚轮或 + / − 缩放 · 拖动平移</div></div>
       <aside class="map-details"><div class="map-detail-heading"><span class="small-label">当前筛选范围</span><strong id="map-point-count">—</strong><p id="map-counts">等待访问记录</p></div><div id="map-region-list" class="map-region-list" aria-label="来源地区排行"></div><p class="inline-note" id="map-coverage"></p></aside>
     </div>
     <p class="inline-note map-explanation">连线循环展示所选范围内的访问方向，不表示实时数据包或连接成功；位置为出口地区的近似参考点。</p>
+    <p id="map-threat-rule" class="inline-note map-explanation"></p>
   </article>
   <details class="panel map-location">
     <summary>RouterOS 所在地 <span id="map-location-summary">尚未设置</span></summary>
