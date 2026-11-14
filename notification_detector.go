@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"net/netip"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -14,6 +13,7 @@ type notificationBucket struct {
 	ports  map[int]bool
 }
 type notificationDetector struct {
+	geo      *GeoLookup
 	settings *NotificationSettings
 	failures map[string]*notificationBucket
 	scans    map[string]*notificationBucket
@@ -24,7 +24,7 @@ type notificationDetector struct {
 
 func (d *notificationDetector) process(s *NotificationSettings, runtime *Settings, events []Event, now time.Time) ([]string, int64, int64) {
 	if d.settings != s {
-		*d = notificationDetector{settings: s, failures: map[string]*notificationBucket{}, scans: map[string]*notificationBucket{}, cooldown: map[string]time.Time{}}
+		*d = notificationDetector{geo: d.geo, settings: s, failures: map[string]*notificationBucket{}, scans: map[string]*notificationBucket{}, cooldown: map[string]time.Time{}}
 	}
 	if !s.Enabled {
 		return nil, 0, 0
@@ -50,7 +50,7 @@ func (d *notificationDetector) process(s *NotificationSettings, runtime *Setting
 	}
 	messages := []string{}
 	var dropped, suppressed int64
-	emit := func(key, text string) {
+	emit := func(key, title, source, detail string) {
 		if until := d.cooldown[key]; now.Before(until) {
 			suppressed++
 			return
@@ -60,12 +60,12 @@ func (d *notificationDetector) process(s *NotificationSettings, runtime *Setting
 			return
 		}
 		d.cooldown[key] = now.Add(notificationCooldown)
-		messages = append(messages, "ROS Watch 告警 · "+text)
+		messages = append(messages, "ROS Watch 告警 · "+title+"\n来源："+notificationLabel(source)+"\n地区："+notificationLabel(localizedLocation(d.geo.location(source)))+detail)
 	}
 	for _, event := range events {
 		if l := event.Log; l != nil && l.Category == "login" && l.Source != "" {
 			key := strings.Join([]string{l.Sender, l.Device, l.Source, l.Username}, "\x00")
-			detail := fmt.Sprintf("\n设备：%s\n账号：%s\n来源：%s\n方式：%s", notificationLabel(l.Device), notificationLabel(l.Username), l.Source, notificationLabel(l.Method))
+			detail := fmt.Sprintf("\n设备：%s\n账号：%s\n方式：%s", notificationLabel(l.Device), notificationLabel(l.Username), notificationLabel(l.Method))
 			if s.LoginFailures && l.Event == "failure" {
 				window := int64(l.TS) / 300
 				bucket := d.failures[key]
@@ -79,7 +79,7 @@ func (d *notificationDetector) process(s *NotificationSettings, runtime *Setting
 				}
 				bucket.count++
 				if bucket.count >= 5 {
-					emit("failure\x00"+key, "连续登录失败"+detail+fmt.Sprintf("\n同一 5 分钟固定窗口已观察到 %d 次失败。", bucket.count))
+					emit("failure\x00"+key, "连续登录失败", l.Source, detail+fmt.Sprintf("\n同一 5 分钟固定窗口已观察到 %d 次失败。", bucket.count))
 				}
 			}
 			if s.LoginSuccess && l.Event == "success" {
@@ -95,7 +95,7 @@ func (d *notificationDetector) process(s *NotificationSettings, runtime *Setting
 					}
 				}
 				if !trusted {
-					emit("success\x00"+key, "非可信来源登录成功"+detail)
+					emit("success\x00"+key, "非可信来源登录成功", l.Source, detail)
 				}
 			}
 		}
@@ -123,7 +123,7 @@ func (d *notificationDetector) process(s *NotificationSettings, runtime *Setting
 				d.ports++
 			}
 			if len(bucket.ports) >= runtime.ScanPorts {
-				emit("scan\x00"+key, "疑似端口扫描\n来源："+event.Src+"\n设备日志来源："+event.Sender+"\n在 "+strconv.Itoa(runtime.ScanWindow)+" 秒固定窗口内观察到至少 "+strconv.Itoa(len(bucket.ports))+" 个不同目标端口。")
+				emit("scan\x00"+key, "疑似端口扫描", event.Src, "\n设备日志来源："+notificationLabel(event.Sender))
 			}
 		}
 	}

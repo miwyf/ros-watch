@@ -56,7 +56,18 @@ func scanEligible(e Event) bool {
 	if direction == "" {
 		direction = classifyTraffic(e)
 	}
-	return direction == trafficInbound
+	return direction == trafficInbound && e.Business == ""
+}
+
+// All scan summaries use per-device fixed windows and exclude exact business matches.
+func (s *Store) scanQuery(f Filters) (string, []any) {
+	where, args := f.where()
+	settings := s.settings.Load()
+	params := append([]any{settings.ScanWindow}, args...)
+	params = append(params, settings.ScanPorts)
+	return `SELECT sender,src,MAX(ports) ports,SUM(n) n,MIN(first) first,MAX(last) last,COUNT(*) OVER() total FROM (
+ SELECT sender,src,CAST(ts / ? AS INTEGER) window,COUNT(DISTINCT dport) ports,COUNT(*) n,MIN(ts) first,MAX(ts) last FROM events WHERE ` + where + ` AND direction='inbound' AND dport IS NOT NULL AND NOT ` + businessExistsSQL + ` GROUP BY sender,src,window HAVING ports >= ?
+ ) GROUP BY sender,src`, params
 }
 
 // Upgrade existing records once, without discarding raw history. Batches bound

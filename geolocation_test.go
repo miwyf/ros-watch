@@ -64,6 +64,20 @@ func TestGeoCacheBoundedAndConcurrent(t *testing.T) {
 	}
 }
 
+func TestLocalizedLocationPreservesRawDataAndSpecialAddresses(t *testing.T) {
+	for _, item := range []struct{ raw, want string }{{"Australia|0|Sydney|ISP|AU", "澳大利亚 · Sydney"}, {"United States|California|Los Angeles|ISP|US", "美国 · California · Los Angeles"}, {"China|上海|上海|电信|CN", "中国 · 上海"}, {"Hong Kong|0|九龙|0|HK", "中国 · 香港 · 九龙"}, {"0|0|0|0|0", "未知地区"}} {
+		location := parseGeoLocation(item.raw)
+		before := location
+		if got := localizedLocation(location); got != item.want || location != before {
+			t.Fatalf("localized location %q want %q", got, item.want)
+		}
+	}
+	var g *GeoLookup
+	if localizedLocation(g.location("192.168.1.1")) != "内网地址" || localizedLocation(g.location("invalid")) != "未知地区" {
+		t.Fatal("special location changed")
+	}
+}
+
 func TestGeoChinaRegionNamesPreserveLookupCodes(t *testing.T) {
 	for _, item := range []struct{ raw, code, region, label string }{
 		{"旧名称|0|台北|0|TW", "TW", "台湾", "中国 · 台湾 · 台北"},

@@ -97,11 +97,11 @@ func TestMQTTValidationAndDiscovery(t *testing.T) {
 		if config["state_class"] == "total_increasing" {
 			t.Fatal("rolling count incorrectly marked cumulative")
 		}
-		if e.key == "scan_sources_6h" && config["state_class"] != nil {
-			t.Fatal("capped scan count must support text 20+")
+		if e.key == "scan_sources_6h" && config["state_class"] != "measurement" {
+			t.Fatal("exact scan count must remain numeric")
 		}
 	}
-	if len(seen) != 11 {
+	if len(seen) != 16 {
 		t.Fatal("wrong entity count")
 	}
 	_, discovery := mqttDiscovery(base, mqttEntities[0])
@@ -155,7 +155,7 @@ func TestMQTTSnapshotWindowAndFailure(t *testing.T) {
 	<-a.expensive
 }
 
-func TestMQTTSnapshotCappedScansAndPortlessTraffic(t *testing.T) {
+func TestMQTTSnapshotExactScansAndPortlessTraffic(t *testing.T) {
 	a := testApp(t)
 	settings := *a.settings.Load()
 	settings.ScanPorts = 2
@@ -178,8 +178,8 @@ func TestMQTTSnapshotCappedScansAndPortlessTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot, err := a.mqttSnapshot(context.Background(), now)
-	if err != nil || snapshot.state["scan_sources_12h"] != "20+" || snapshot.state["top_ports"] != "— / ICMP" {
-		t.Fatal("capped scan count or portless ranking misleading", snapshot.state, err)
+	if err != nil || number(snapshot.state["scan_sources_12h"]) != 21 || snapshot.state["top_ports"] != "— / ICMP" {
+		t.Fatal("exact scan count or portless ranking misleading", snapshot.state, err)
 	}
 }
 
@@ -210,11 +210,13 @@ func TestMQTTBrokerLifecycle(t *testing.T) {
 	}), "monitor subscribe failed"); err != nil {
 		t.Fatal(err)
 	}
+	seenMessages := map[string]string{}
 	wait := func(topic, payload string) observed {
 		t.Helper()
 		for {
 			select {
 			case m := <-messages:
+				seenMessages[m.topic] = m.payload
 				if m.topic == topic && (payload == "" || m.payload == payload) {
 					return m
 				}
@@ -231,6 +233,35 @@ func TestMQTTBrokerLifecycle(t *testing.T) {
 	}
 	wait(base+"/state", "")
 	wait(base+"/availability", "online")
+	for _, entity := range mqttEntities {
+		configTopic, _ := mqttDiscovery(s, entity)
+		if _, exists := seenMessages[configTopic]; !exists {
+			t.Fatal("missing discovery publication", entity.key)
+		}
+	}
+	var state map[string]any
+	if err := json.Unmarshal([]byte(seenMessages[base+"/state"]), &state); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"scan_sources_12h", "inbound_records_12h", "response_records_12h", "unknown_records_12h", "business_records_12h"} {
+		if _, ok := state[key].(float64); !ok {
+			t.Fatal("new count was not published as a number", key, state[key])
+		}
+	}
+	for _, key := range []string{"top_sources", "top_ports"} {
+		var ranks map[string]any
+		if err := json.Unmarshal([]byte(seenMessages[base+"/"+key]), &ranks); err != nil {
+			t.Fatal(err)
+		}
+		for _, group := range []string{"items", "suspicious_items", "business_items"} {
+			if _, ok := ranks[group].([]any); !ok {
+				t.Fatal("missing rank array", key, group)
+			}
+		}
+	}
+	if !strings.Contains(seenMessages[base+"/recent_events"], `"items":[]`) {
+		t.Fatal("missing empty recent events")
+	}
 	if err := a.mqtt.publishNow(ctx); err != nil {
 		t.Fatal(err)
 	}

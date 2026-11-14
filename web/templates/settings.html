@@ -176,7 +176,7 @@
         <label>密码<input id="mqtt-password" type="password" maxlength="1024" autocomplete="new-password"><small id="mqtt-password-hint">可留空，按 Broker 配置填写。</small></label>
         <label id="mqtt-clear-field" class="notification-check full-field hidden"><input id="mqtt-clear-password" type="checkbox">清除已保存的密码</label>
         <details class="full-field storage-summary"><summary>自动发现设置</summary><label>发现前缀<input id="mqtt-discovery_prefix" maxlength="128" value="homeassistant"><small>与 HA 的 MQTT 发现前缀一致，通常保持默认。</small></label><p class="inline-note">修改前缀或 Broker 后，旧 Broker 中的实体可能仍需在 HA 中手动移除。</p></details>
-        <p class="field-note full-field">最近 12 小时统计，每 60 秒发布一次。自动发现 11 个只读实体，含访问数量、来源、端口、疑似扫描、每分钟趋势及接收状态。排行作为属性发送，不上传原始日志。关闭接入后，实体保留并显示不可用。</p>
+        <p class="field-note full-field">最近 12 小时统计，每 60 秒发布一次。自动发现 16 个只读实体，含访问分类、正常业务、疑似扫描完整数量、近期关注事件、每分钟趋势及接收状态。原有实体继续保留，排行区分可疑、正常业务和全部访问；仅发送汇总与事件摘要。关闭接入后，实体保留并显示不可用。</p>
         <details class="full-field storage-summary"><summary>接入状态 <span id="mqtt-status-summary">尚未加载</span></summary><dl id="mqtt-status" class="status-list"></dl></details>
       </div>
       <div class="settings-actions"><button class="primary" type="submit">保存接入设置</button><button id="mqtt-publish" type="button">立即发布</button><a class="outline-button" href="/api/mqtt/dashboard">下载 HA 看板</a><a class="text-button" href="/api/mqtt/dashboard?style=basic">下载简版</a><span id="mqtt-result" role="status"></span></div>

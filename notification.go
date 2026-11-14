@@ -41,6 +41,7 @@ type notificationStatus struct {
 type Notifier struct {
 	settings  atomic.Pointer[NotificationSettings]
 	collector *Collector
+	geo       *GeoLookup
 	client    *http.Client
 	batches   chan observedBatch
 	queue     chan notification
@@ -53,9 +54,9 @@ type Notifier struct {
 	nextSend  time.Time // guarded by gate
 }
 
-func newNotifier(s NotificationSettings, collector *Collector) *Notifier {
+func newNotifier(s NotificationSettings, collector *Collector, geo *GeoLookup) *Notifier {
 	ctx, cancel := context.WithCancel(context.Background())
-	n := &Notifier{collector: collector, batches: make(chan observedBatch, 8), queue: make(chan notification, 32), gate: make(chan struct{}, 1), ctx: ctx, cancel: cancel,
+	n := &Notifier{collector: collector, geo: geo, batches: make(chan observedBatch, 8), queue: make(chan notification, 32), gate: make(chan struct{}, 1), ctx: ctx, cancel: cancel,
 		client: &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil, MaxIdleConns: 2, MaxIdleConnsPerHost: 1, IdleConnTimeout: 30 * time.Second}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	n.settings.Store(&s)
 	n.wg.Add(2)
@@ -104,7 +105,10 @@ func (n *Notifier) monitor() {
 	defer n.wg.Done()
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
-	detector := notificationDetector{}
+	detector := notificationDetector{geo: n.geo}
+	var businessRules []BusinessRule
+	var businessRevision uint64
+	businessLoaded := false
 	var previous *NotificationSettings
 	storageState := ""
 	for {
@@ -114,6 +118,30 @@ func (n *Notifier) monitor() {
 		case batch := <-n.batches:
 			if batch.settings != n.settings.Load() || !batch.settings.Enabled {
 				continue
+			}
+			if batch.settings.Scans {
+				revision := n.collector.store.businessRevision.Load()
+				if !businessLoaded || revision != businessRevision {
+					ctx, cancel := boundedContext(n.ctx)
+					rules, err := n.collector.store.businessRules(ctx)
+					cancel()
+					if err != nil {
+						n.counts(int64(len(batch.events)), 0)
+						continue
+					}
+					businessRules, businessRevision, businessLoaded = rules, revision, true
+					detector.scans, detector.ports = map[string]*notificationBucket{}, 0
+				}
+				// Never mutate the collector's batch; other consumers may still use it.
+				batch.events = append([]Event(nil), batch.events...)
+				for i := range batch.events {
+					for _, rule := range businessRules {
+						if rule.matches(batch.events[i]) {
+							batch.events[i].Business = rule.Name
+							break
+						}
+					}
+				}
 			}
 			messages, dropped, suppressed := detector.process(batch.settings, n.collector.settings.Load(), batch.events, time.Now())
 			n.counts(dropped, suppressed)

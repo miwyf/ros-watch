@@ -131,6 +131,110 @@ func notificationLogin(event, source string, ts float64) Event {
 	return Event{Log: &LogEvent{TS: ts, Sender: "192.0.2.1", Device: "fixture-router", Category: "login", Event: event, Username: "fixture-user", Source: source, Method: "winbox"}}
 }
 
+func TestNotificationScanLocationFormatAndExactBusinessExclusion(t *testing.T) {
+	g, err := newGeoLookup("geo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.close()
+	s := fixtureNotification("feishu")
+	s.Enabled, s.Scans = true, true
+	runtime := defaultSettings()
+	runtime.ScanPorts = 3
+	d := notificationDetector{geo: g}
+	now := time.Unix(1800000030, 0)
+	e := *sampleEvent(1883)
+	e.Src = "1.2.3.4"
+	e.TS = float64(now.Unix())
+	e.Business = "MQTT"
+	if messages, _, _ := d.process(&s, &runtime, []Event{e}, now); len(messages) != 0 {
+		t.Fatal("normal business triggered scan")
+	}
+	e.Business = ""
+	for _, port := range []int{80, 81, 82} {
+		e.Dport = &port
+		messages, _, _ := d.process(&s, &runtime, []Event{e}, now)
+		if port != 82 && len(messages) != 0 {
+			t.Fatal("normal port helped reach threshold")
+		}
+		if port == 82 {
+			if len(messages) != 1 || !strings.Contains(messages[0], "地区：澳大利亚") || strings.Contains(messages[0], "固定窗口") || strings.Contains(messages[0], "不同目标端口") {
+				t.Fatal("wrong scan message", messages)
+			}
+		}
+	}
+	d = notificationDetector{}
+	e.Src = "8.8.8.8"
+	for _, port := range []int{80, 81, 82} {
+		e.Dport = &port
+		messages, _, _ := d.process(&s, &runtime, []Event{e}, now)
+		if port == 82 && (len(messages) != 1 || !strings.Contains(messages[0], "地区：归属地库暂不可用")) {
+			t.Fatal("missing geo suppressed alert", messages)
+		}
+	}
+}
+
+func TestNotificationMonitorRefreshesPreciseBusinessRules(t *testing.T) {
+	a := testApp(t)
+	s := fixtureNotification("feishu")
+	s.Enabled, s.Scans, s.Storage = true, true, false
+	runtime := *a.settings.Load()
+	runtime.ScanPorts = 3
+	a.settings.Store(&runtime)
+	ctx, cancel := context.WithCancel(context.Background())
+	n := &Notifier{collector: a.collector, geo: a.geo, client: &http.Client{}, ctx: ctx, cancel: cancel, batches: make(chan observedBatch, 8), queue: make(chan notification, 8)}
+	n.settings.Store(&s)
+	n.wg.Add(1)
+	go n.monitor()
+	defer n.close()
+	now := unixNow()
+	e := *sampleEvent(1883)
+	e.Src = "1.2.3.4"
+	e.TS = now
+	batch := func(source string, ports ...int) []Event {
+		rows := []Event{}
+		for _, port := range ports {
+			copy := e
+			p := port
+			copy.Dport = &p
+			rows = append(rows, copy)
+		}
+		for i := 0; i < 5; i++ {
+			rows = append(rows, notificationLogin("failure", source, now))
+		}
+		return rows
+	}
+	wait := func(want string) {
+		t.Helper()
+		select {
+		case message := <-n.queue:
+			if !strings.Contains(message.text, want) {
+				t.Fatal("unexpected notification", message.text)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("notification monitor timeout")
+		}
+	}
+	n.observe(batch("203.0.113.10", 80, 81))
+	wait("连续登录失败")
+	rule := BusinessRule{Name: "MQTT", Sender: e.Sender, Src: e.Src, Dst: e.Dst, Proto: e.Proto, Dport: 1883, Scope: e.Scope, Interface: e.Interface}
+	if err := a.store.saveBusiness(ctx, rule); err != nil {
+		t.Fatal(err)
+	}
+	n.observe(batch("203.0.113.11", 1883, 80, 81))
+	wait("连续登录失败")
+	copy := e
+	p := 82
+	copy.Dport = &p
+	n.observe([]Event{copy})
+	wait("疑似端口扫描")
+	select {
+	case message := <-n.queue:
+		t.Fatal("duplicate notification", message.text)
+	default:
+	}
+}
+
 func TestNotificationThresholdsCooldownWindowsAndTrustedSources(t *testing.T) {
 	s := fixtureNotification("feishu")
 	s.Enabled, s.LoginSuccess, s.Scans = true, true, true

@@ -27,6 +27,11 @@ views:
           - sensor.ros_watch_INSTANCE_top_sources
           - sensor.ros_watch_INSTANCE_top_ports
           - binary_sensor.ros_watch_INSTANCE_receiver_problem
+          - sensor.ros_watch_INSTANCE_inbound_records_12h
+          - sensor.ros_watch_INSTANCE_response_records_12h
+          - sensor.ros_watch_INSTANCE_unknown_records_12h
+          - sensor.ros_watch_INSTANCE_business_records_12h
+          - sensor.ros_watch_INSTANCE_recent_events
         styles:
           card:
             - padding: 28px 32px 22px
@@ -45,9 +50,9 @@ views:
             - '--secondary-text-color': '#8396ac'
             - '--divider-color': '#243247'
           grid:
-            - grid-template-areas: '"hero hero" "metrics metrics" "chart status" "sources ports" "footer footer"'
+            - grid-template-areas: '"hero hero" "metrics metrics" "traffic traffic" "chart status" "sources ports" "events events" "footer footer"'
             - grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr)
-            - grid-template-rows: auto auto auto auto auto
+            - grid-template-rows: auto auto auto auto auto auto auto
             - gap: 16px
             - align-items: stretch
           custom_fields:
@@ -55,6 +60,11 @@ views:
               - text-align: left
               - white-space: normal
             metrics:
+              - white-space: normal
+            traffic:
+              - white-space: normal
+            events:
+              - text-align: left
               - white-space: normal
             chart:
               - min-width: 0
@@ -109,9 +119,15 @@ views:
           .dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:7px; background:#54dabd; box-shadow:0 0 9px #54dabd50; }
           .rank { display:grid; grid-template-columns:20px minmax(0,1fr) auto; align-items:center; gap:12px; margin-bottom:15px; }
           .rank:last-child { margin-bottom:0; }
+          .rank-group + .rank-group { border-top:1px solid #243247; padding-top:16px; margin-top:18px; }
+          .rank-group h3 { color:#a7bbcf; font-size:12px; font-weight:500; margin:0 0 16px; }
+          .traffic-note { color:#8396ac; font-size:11px; margin:10px 3px 0; text-align:left; }
+          .event-row { display:flex; gap:16px; align-items:baseline; padding:10px 0; border-top:1px solid #243247; font-size:12px; flex-wrap:wrap; }
+          .event-row small { color:#8396ac; }
+          .event-row span { overflow-wrap:anywhere; }
           .rank-no { color:#5d7591; font:11px ui-monospace,Consolas,monospace; }
           .rank-top { display:flex; align-items:center; gap:12px; margin-bottom:7px; min-width:0; }
-          .rank-name { font-size:12px; color:#d7e4f4; white-space:nowrap; }
+          .rank-name { font-size:12px; color:#d7e4f4; white-space:nowrap; min-width:0; overflow:hidden; text-overflow:ellipsis; }
           .rank-place { color:#6e859f; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
           .bar { height:3px; width:100%; border-radius:5px; background:#1e3047; overflow:hidden; }
           .bar i { display:block; height:100%; border-radius:5px; background:linear-gradient(90deg,#357c89,#65d9c5); }
@@ -122,7 +138,7 @@ views:
           .footer { display:flex; justify-content:space-between; gap:16px; align-items:center; color:#546b85; font-size:10px; padding:2px 2px 0; }
           .footer .mono { letter-spacing:1.3px; color:#7890aa; }
           @media(max-width:1000px) {
-            #container { grid-template-columns:minmax(0,1fr) !important; grid-template-areas:"hero" "metrics" "chart" "status" "sources" "ports" "footer" !important; }
+            #container { grid-template-columns:minmax(0,1fr) !important; grid-template-areas:"hero" "metrics" "traffic" "chart" "status" "sources" "ports" "events" "footer" !important; }
             .status-layout { margin:5px 0 14px; }
           }
           @media(max-width:650px) {
@@ -147,8 +163,13 @@ views:
             ]]]
           metrics: |
             [[[
-              const items=[['access_records_12h','连接尝试','条已收到的访问记录','mdi:arrow-top-right','#76e1c2'],['unique_sources_12h','独立来源','个来源 IP 地址','mdi:ip-network-outline','#7eb6f4'],['target_ports_12h','目标端口','个日志中观察到的端口','mdi:ethernet','#a7a0f4'],['scan_sources_12h','疑似扫描','个来源 · 固定窗口识别','mdi:radar','#ecb56f']];
+              const items=[['access_records_12h','全部访问记录','条记录 · 包含响应与正常业务','mdi:arrow-top-right','#76e1c2'],['unique_sources_12h','独立来源','个来源 IP 地址','mdi:ip-network-outline','#7eb6f4'],['target_ports_12h','目标端口','个日志中观察到的端口','mdi:ethernet','#a7a0f4'],['scan_sources_12h','疑似扫描','组设备与来源 · 已排除正常业务','mdi:radar','#ecb56f']];
               return `<div class="metric-grid">${items.map(([key,label,caption,icon,color])=>{const raw=states['sensor.ros_watch_INSTANCE_'+key]?.state;const n=Number(raw);const value=raw&&!['unknown','unavailable'].includes(raw)?Number.isFinite(n)?n.toLocaleString('zh-CN'):raw==='20+'?'20+':'—':'—';return `<div class="metric" style="--tone:${color}"><div class="metric-top">${label}<span class="metric-icon"><ha-icon icon="${icon}"></ha-icon></span></div><div class="metric-value mono">${value}</div><div class="metric-caption">${caption}</div></div>`;}).join('')}</div>`;
+            ]]]
+          traffic: |
+            [[[
+              const items=[['inbound_records_12h','外部新连接','#76e1c2'],['response_records_12h','已建立 / 响应','#7eb6f4'],['unknown_records_12h','方向未确认','#a7a0f4'],['business_records_12h','已标记正常业务','#81c9ab']];
+              return `<div class="metric-grid">${items.map(([key,label,color])=>{const raw=states['sensor.ros_watch_INSTANCE_'+key]?.state;const value=raw&&!['unknown','unavailable'].includes(raw)&&Number.isFinite(Number(raw))?Number(raw).toLocaleString('zh-CN'):'—';return `<div class="metric" style="--tone:${color}"><div class="metric-top">${label}</div><div class="metric-value mono" style="font-size:28px">${value}</div><div class="metric-caption">条 · 最近 12 小时</div></div>`;}).join('')}</div><div class="traffic-note">前三项按方向划分；正常业务是额外标记，可能与方向分类重叠，不重复相加。</div>`;
             ]]]
           chart:
             card:
@@ -262,15 +283,21 @@ views:
             [[[
               const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
               const e=states['sensor.ros_watch_INSTANCE_top_sources']; const usable=e&&!['unknown','unavailable'].includes(e.state);
-              const rows=usable?(e.attributes.items||[]).slice(0,5):[]; const max=Math.max(1,...rows.map(r=>Number(r.count)||0));
-              return `<div class="panel"><div class="panel-head"><span class="panel-title">来源 IP 排行</span><span class="panel-index">TOP SOURCES / 05</span></div>${rows.length?rows.map((r,i)=>`<div class="rank"><span class="rank-no">${String(i+1).padStart(2,'0')}</span><div><div class="rank-top"><span class="rank-name mono">${esc(r.source)}</span><span class="rank-place">${esc(r.location)}</span></div><div class="bar"><i style="width:${Math.max(0,Math.min(100,Number(r.count)/max*100))}%"></i></div></div><div class="rank-count mono">${esc(Number(r.count).toLocaleString('zh-CN'))}<small>条</small></div></div>`).join(''):`<div class="empty">${usable?'当前窗口暂无来源记录':'等待来源数据同步'}</div>`}</div>`;
+              const groups=[['suspicious_items','近期可疑来源'],['business_items','正常业务来源'],['items','全部访问排行']];
+              return `<div class="panel"><div class="panel-head"><span class="panel-title">来源观察</span><span class="panel-index">SOURCES / 12H</span></div>${groups.map(([key,label])=>{const rows=usable?(e.attributes[key]||[]).slice(0,5):[];const max=Math.max(1,...rows.map(r=>Number(r.count)||0));return `<div class="rank-group"><h3>${label}</h3>${rows.length?rows.map((r,i)=>`<div class="rank"><span class="rank-no">${String(i+1).padStart(2,'0')}</span><div style="min-width:0"><div class="rank-top"><span class="rank-name mono">${esc(r.source)}</span><span class="rank-place">${esc(r.location)}</span></div><div class="bar"><i style="width:${Math.max(0,Math.min(100,Number(r.count)/max*100))}%"></i></div></div><div class="rank-count mono">${esc(Number(r.count).toLocaleString('zh-CN'))}<small>条</small></div></div>`).join(''):`<div class="empty">${usable?'当前范围暂无记录':'等待来源数据同步'}</div>`}</div>`;}).join('')}</div>`;
             ]]]
           ports: |
             [[[
               const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
               const e=states['sensor.ros_watch_INSTANCE_top_ports']; const usable=e&&!['unknown','unavailable'].includes(e.state);
-              const rows=usable?(e.attributes.items||[]).slice(0,5):[]; const max=Math.max(1,...rows.map(r=>Number(r.n)||0));
-              return `<div class="panel ports"><div class="panel-head"><span class="panel-title">目标端口排行</span><span class="panel-index">TOP PORTS / 05</span></div>${rows.length?rows.map((r,i)=>`<div class="rank"><span class="rank-no">${String(i+1).padStart(2,'0')}</span><div><div class="rank-top"><span class="rank-name mono">${esc(r.dport)} <span style="color:#5d7692">/</span> ${esc(r.proto)}</span></div><div class="bar"><i style="width:${Math.max(0,Math.min(100,Number(r.n)/max*100))}%"></i></div></div><div class="rank-count mono">${esc(Number(r.n).toLocaleString('zh-CN'))}<small>条</small></div></div>`).join(''):`<div class="empty">${usable?'当前窗口暂无端口记录':'等待端口数据同步'}</div>`}</div>`;
+              const groups=[['suspicious_items','近期可疑来源的未标记服务'],['business_items','已标记正常业务'],['items','全部目标端口排行']];
+              return `<div class="panel ports"><div class="panel-head"><span class="panel-title">目标端口观察</span><span class="panel-index">PORTS / 12H</span></div>${groups.map(([key,label])=>{const rows=usable?(e.attributes[key]||[]).slice(0,5):[];const max=Math.max(1,...rows.map(r=>Number(r.n)||0));return `<div class="rank-group"><h3>${label}</h3>${rows.length?rows.map((r,i)=>`<div class="rank"><span class="rank-no">${String(i+1).padStart(2,'0')}</span><div><div class="rank-top"><span class="rank-name mono">${esc(r.dport)} <span style="color:#5d7692">/</span> ${esc(r.proto)}</span></div><div class="bar"><i style="width:${Math.max(0,Math.min(100,Number(r.n)/max*100))}%"></i></div></div><div class="rank-count mono">${esc(Number(r.n).toLocaleString('zh-CN'))}<small>条</small></div></div>`).join(''):`<div class="empty">${usable?'当前范围暂无记录':'等待端口数据同步'}</div>`}</div>`;}).join('')}</div>`;
+            ]]]
+          events: |
+            [[[
+              const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+              const e=states['sensor.ros_watch_INSTANCE_recent_events'];const usable=e&&!['unknown','unavailable'].includes(e.state);const rows=usable?(e.attributes.items||[]).slice(0,8):[];
+              return `<div class="panel"><div class="panel-head"><span class="panel-title">近期关注事件</span><span class="panel-index">LATEST / 08</span></div>${rows.length?rows.map(r=>`<div class="event-row"><span class="mono">${esc(new Date(Number(r.last)*1000).toLocaleString('zh-CN',{hour12:false}))}</span><strong>${esc(r.label)}</strong><span>${esc(r.source||r.device)}</span><small>${esc(r.location||[r.category,r.event,r.severity].filter(Boolean).join(' · '))}</small></div>`).join(''):`<div class="empty">${usable?'当前范围暂无关注事件':'等待事件数据同步'}</div>`}</div>`;
             ]]]
           footer: |
             [[[

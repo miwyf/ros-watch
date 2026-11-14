@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/netip"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,39 @@ import (
 
 	"github.com/lionsoul2014/ip2region/binding/golang/service"
 )
+
+var geoCountryNames = sync.OnceValue(func() map[string]struct{ Name string } {
+	var places struct {
+		Countries map[string]struct{ Name string }
+	}
+	data, _ := assets.ReadFile("web/static/map-places.json")
+	_ = json.Unmarshal(data, &places)
+	return places.Countries
+})
+
+// Notifications and MQTT have no browser-side country translation.
+func localizedLocation(location IPLocation) string {
+	if location.Kind != "located" {
+		if location.Label != "" {
+			return location.Label
+		}
+		return "未知地区"
+	}
+	country := location.Country
+	if name := geoCountryNames()[location.CountryCode].Name; name != "" && location.CountryCode != "TW" && location.CountryCode != "HK" && location.CountryCode != "MO" {
+		country = name
+	}
+	parts := []string{}
+	for _, value := range []string{country, location.Region, location.City} {
+		if value != "" && (len(parts) == 0 || parts[len(parts)-1] != value) {
+			parts = append(parts, value)
+		}
+	}
+	if len(parts) == 0 {
+		return "未知地区"
+	}
+	return strings.Join(parts, " · ")
+}
 
 const geoDataVersion = "v3.18.0 / 2026-09-08"
 const geoCacheLimit = 4096

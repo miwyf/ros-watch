@@ -106,7 +106,7 @@ views:
           {% if is_state('sensor.INSTANCE_receiver_state', '演示数据') %}
           **演示数据 · 与实际网络无关**
           {% endif %}
-          访问记录反映连接尝试，不等于成功攻击或已封禁。
+          全部访问记录包含外部新连接、响应通信及方向未确认记录，不等于成功攻击或已封禁。
       - type: grid
         columns: 2
         square: false
@@ -124,6 +124,17 @@ views:
             entity: sensor.INSTANCE_scan_sources_12h
             name: 疑似扫描来源 · 12 小时
             color: amber
+      - type: entities
+        title: 访问分类 · 12 小时
+        entities:
+          - entity: sensor.INSTANCE_inbound_records_12h
+            name: 外部新连接
+          - entity: sensor.INSTANCE_response_records_12h
+            name: 已建立 / 响应
+          - entity: sensor.INSTANCE_unknown_records_12h
+            name: 方向未确认
+          - entity: sensor.INSTANCE_business_records_12h
+            name: 已标记正常业务（与方向分类重叠）
       - type: history-graph
         title: 每分钟新增访问记录
         hours_to_show: 12
@@ -131,19 +142,35 @@ views:
           - entity: sensor.INSTANCE_access_records_minute
             name: 上一分钟记录数
       - type: markdown
-        title: 来源排行 · TOP 5
+        title: 来源观察 · 12 小时
         content: |
-          {% for item in state_attr('sensor.INSTANCE_top_sources', 'items') or [] %}
+          {% for key, title in [('suspicious_items','近期可疑来源'),('business_items','正常业务来源'),('items','全部访问排行')] %}
+          ### {{ title }}
+          {% for item in state_attr('sensor.INSTANCE_top_sources', key) or [] %}
           **{{ loop.index }}. {{ item.source }}** · {{ item.location }} · {{ item.count }} 条
 
           {% else %}暂无排行{% endfor %}
+          {% endfor %}
       - type: markdown
-        title: 目标端口 · TOP 5
+        title: 目标端口观察 · 12 小时
         content: |
-          {% for item in state_attr('sensor.INSTANCE_top_ports', 'items') or [] %}
+          {% for key, title in [('suspicious_items','近期可疑来源的未标记服务'),('business_items','正常业务服务'),('items','全部目标端口排行')] %}
+          ### {{ title }}
+          {% for item in state_attr('sensor.INSTANCE_top_ports', key) or [] %}
           **{{ loop.index }}. {{ item.dport if item.dport is not none else '—' }} / {{ item.proto }}** · {{ item.n }} 条
 
           {% else %}暂无排行{% endfor %}
+          {% endfor %}
+      - type: markdown
+        title: 近期关注事件
+        content: |
+          {% if states('sensor.INSTANCE_recent_events') in ['unknown','unavailable'] %}
+          等待事件数据同步
+          {% else %}
+          {% for item in state_attr('sensor.INSTANCE_recent_events', 'items') or [] %}
+          - {{ item.last | timestamp_custom('%m-%d %H:%M:%S') }} · **{{ item.label }}** · {{ item.source | default(item.device, true) }} {{ item.location | default('') }}
+          {% else %}当前范围暂无关注事件{% endfor %}
+          {% endif %}
       - type: entities
         title: 接收与数据状态
         entities:

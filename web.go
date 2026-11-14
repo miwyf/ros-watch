@@ -88,12 +88,16 @@ func newApp(config Config) (*App, error) {
 		return nil, err
 	}
 	a.collector = newCollector(a.store, &a.settings, config.Demo)
+	a.geo, err = newGeoLookup("geo")
+	if err != nil {
+		log.Print("IP location database unavailable; collection remains active")
+	}
 	notifications, err := control.loadNotifications(context.Background())
 	if err != nil {
 		a.close()
 		return nil, err
 	}
-	a.notifier = newNotifier(notifications, a.collector)
+	a.notifier = newNotifier(notifications, a.collector, a.geo)
 	a.collector.notifier = a.notifier
 	a.templates, err = template.New("").ParseFS(assets, "web/templates/*.html")
 	if err != nil {
@@ -120,10 +124,6 @@ func newApp(config Config) (*App, error) {
 		return nil, errors.New("session key unavailable or invalid")
 	}
 	a.cookies = securecookie.New(key, nil).MaxAge(43200).MaxLength(2048).SetSerializer(securecookie.JSONEncoder{})
-	a.geo, err = newGeoLookup("geo")
-	if err != nil {
-		log.Print("IP location database unavailable; collection remains active")
-	}
 	mqttSettings, err := control.loadMQTT(context.Background())
 	if err != nil {
 		a.close()

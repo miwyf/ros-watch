@@ -141,8 +141,9 @@ func (p *MQTTPublisher) publish(client mqtt.Client, s MQTTSettings, discovery bo
 		topic string
 		value any
 	}{
-		{base + "/top_sources", map[string]any{"items": snapshot.sources}},
-		{base + "/top_ports", map[string]any{"items": snapshot.ports}},
+		{base + "/top_sources", map[string]any{"items": snapshot.sources, "suspicious_items": snapshot.suspiciousSources, "business_items": snapshot.businessSources}},
+		{base + "/top_ports", map[string]any{"items": snapshot.ports, "suspicious_items": snapshot.suspiciousPorts, "business_items": snapshot.businessPorts}},
+		{base + "/recent_events", map[string]any{"items": snapshot.events}},
 		{base + "/state", snapshot.state},
 		{base + "/availability", "online"},
 	} {

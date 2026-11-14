@@ -21,6 +21,7 @@ type Store struct {
 	dir              string
 	mu               sync.Mutex
 	settings         *atomic.Pointer[Settings]
+	businessRevision atomic.Uint64
 	pruned           atomic.Int64
 	availableDisk    func(string) (uint64, error)
 	storageMu        sync.RWMutex
@@ -301,7 +302,6 @@ func number(v any) float64 {
 
 func (s *Store) summary(ctx context.Context, f Filters) (map[string]any, error) {
 	where, args := f.where()
-	settings := s.settings.Load()
 	bucket := int64(math.Max(60, math.Ceil((f.Until-f.Since)/3600)*60))
 	query := func(sql string, extra ...any) ([]map[string]any, error) {
 		params := append([]any{}, extra...)
@@ -328,11 +328,7 @@ func (s *Store) summary(ctx context.Context, f Filters) (map[string]any, error) 
 	if err != nil {
 		return nil, err
 	}
-	scanArgs := append([]any{settings.ScanWindow}, args...)
-	scanArgs = append(scanArgs, settings.ScanPorts)
-	scanQuery := `SELECT sender,src,MAX(ports) ports,SUM(n) n,MIN(first) first,MAX(last) last,COUNT(*) OVER() total FROM (
- SELECT sender,src,CAST(ts / ? AS INTEGER) window,COUNT(DISTINCT dport) ports,COUNT(*) n,MIN(ts) first,MAX(ts) last FROM events WHERE ` + where + ` AND direction='inbound' AND dport IS NOT NULL GROUP BY sender,src,window HAVING ports >= ?
- ) GROUP BY sender,src`
+	scanQuery, scanArgs := s.scanQuery(f)
 	order := "last DESC,sender,src"
 	if f.ScanOrder == "ports" {
 		order = "ports DESC,last DESC,sender,src"

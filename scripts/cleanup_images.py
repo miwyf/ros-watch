@@ -1,4 +1,4 @@
-"""Manually clean this repository's GHCR versions, retaining the current image graph."""
+"""Manually clean GHCR versions, retaining the current stable and dev image graphs."""
 
 import argparse
 import json
@@ -27,6 +27,11 @@ def manifest_graph(fetch, root):
 
 def deletion_plan(versions, keep):
     return [version for version in versions if version["name"] not in keep]
+
+
+def tagged_roots(versions, tags):
+    return {version["name"] for version in versions
+            if tags.intersection(version.get("metadata", {}).get("container", {}).get("tags", []))}
 
 
 def request_json(url, headers, method="GET"):
@@ -68,10 +73,14 @@ def main():
             registry_headers,
         )
 
+    protected_dev = None
+
     def require_current():
         _, headers = fetch("latest")
         if headers.get("Docker-Content-Digest") != args.expected_digest:
             raise RuntimeError("latest changed; refusing to delete any further versions")
+        if protected_dev is not None and tagged_roots(list_versions(), {"dev"}) != protected_dev:
+            raise RuntimeError("dev changed; refusing to delete any further versions")
 
     require_current()
     keep = manifest_graph(fetch, args.expected_digest)
@@ -92,6 +101,10 @@ def main():
             page += 1
 
     versions = list_versions()
+    protected_dev = tagged_roots(versions, {"dev"})
+    for digest in protected_dev:
+        keep.update(manifest_graph(fetch, digest))
+    require_current()
     if not keep.issubset({version["name"] for version in versions}):
         raise RuntimeError("Current referenced manifests are missing from the package version list")
     old = deletion_plan(versions, keep)

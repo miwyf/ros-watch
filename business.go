@@ -32,6 +32,10 @@ type BusinessRule struct {
 	Remove    bool   `json:"remove,omitempty"`
 }
 
+func (r BusinessRule) matches(e Event) bool {
+	return e.Dport != nil && r.Sender == e.Sender && r.Src == e.Src && r.Dst == e.Dst && r.Proto == e.Proto && r.Dport == *e.Dport && r.Scope == e.Scope && r.Interface == e.Interface
+}
+
 func (r *BusinessRule) validate() error {
 	r.Name = strings.TrimSpace(r.Name)
 	if !validLabel(r.Name) || !validLabel(r.Interface) || (r.Scope != "router" && r.Scope != "forward") || (r.Proto != "TCP" && r.Proto != "UDP") || r.Dport < 1 || r.Dport > 65535 {
@@ -64,9 +68,14 @@ func (s *Store) businessRules(ctx context.Context) ([]BusinessRule, error) {
 	return result, rows.Err()
 }
 
-func (s *Store) saveBusiness(ctx context.Context, r BusinessRule) error {
+func (s *Store) saveBusiness(ctx context.Context, r BusinessRule) (result error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer func() {
+		if result == nil {
+			s.businessRevision.Add(1)
+		}
+	}()
 	if r.Remove {
 		_, err := s.writer.ExecContext(ctx, "DELETE FROM business_rules WHERE id=?", r.ID)
 		return err
