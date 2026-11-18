@@ -83,12 +83,17 @@ func (a *App) accessMap(w http.ResponseWriter, r *http.Request) {
 		filterError(w)
 		return
 	}
-	if !a.acquireQuery(w) {
-		return
+	key := snapshotKey("map", f.Hours, f.Fields, "")
+	data := a.serveSnapshot(w, r, "map", key, func(ctx context.Context, now float64) (map[string]any, error) {
+		f.Since, f.Until = now-f.Hours*3600, now
+		return a.mapStatistics(ctx, f)
+	})
+	if data != nil {
+		jsonResponse(w, http.StatusOK, data)
 	}
-	defer func() { <-a.expensive }()
-	ctx, cancel := boundedContext(r.Context())
-	defer cancel()
+}
+
+func (a *App) mapStatistics(ctx context.Context, f Filters) (map[string]any, error) {
 	where, args := f.where()
 	settings := a.settings.Load()
 	queryArgs := append([]any{}, args...)
@@ -107,8 +112,7 @@ func (a *App) accessMap(w http.ResponseWriter, r *http.Request) {
 )
 SELECT selected.*,COALESCE(peaks.peak_ports,0) peak_ports FROM selected LEFT JOIN peaks USING(src) ORDER BY n DESC,src`, queryArgs...)
 	if err != nil {
-		queryError(w)
-		return
+		return nil, err
 	}
 	truncated := len(rows) > mapSourceLimit
 	if truncated {
@@ -130,5 +134,5 @@ SELECT selected.*,COALESCE(peaks.peak_ports,0) peak_ports FROM selected LEFT JOI
 			locations[row["src"].(string)] = location
 		}
 	}
-	jsonResponse(w, 200, map[string]any{"sources": rows, "locations": locations, "scan_ports": settings.ScanPorts, "scan_window": settings.ScanWindow, "demo": a.config.Demo, "truncated": truncated, "source_limit": mapSourceLimit, "generated_at": unixNow()})
+	return map[string]any{"sources": rows, "locations": locations, "scan_ports": settings.ScanPorts, "scan_window": settings.ScanWindow, "demo": a.config.Demo, "truncated": truncated, "source_limit": mapSourceLimit}, nil
 }

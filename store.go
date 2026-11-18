@@ -17,19 +17,22 @@ import (
 const eventColumns = "ts,sender,src,sport,dst,dport,proto,flags,wan,interface,scope,outcome,raw,direction"
 
 type Store struct {
-	writer, reader   *sql.DB
-	dir              string
-	mu               sync.Mutex
-	settings         *atomic.Pointer[Settings]
-	businessRevision atomic.Uint64
-	pruned           atomic.Int64
-	availableDisk    func(string) (uint64, error)
-	storageMu        sync.RWMutex
-	storage          storageCoverage
-	spacePruned      atomic.Int64
-	lastSpaceCleanup atomic.Int64
-	lastSpaceAttempt atomic.Int64
-	reclaimSupported bool
+	writer, reader     *sql.DB
+	dir                string
+	mu                 sync.Mutex
+	settings           *atomic.Pointer[Settings]
+	businessRevision   atomic.Uint64
+	pruned             atomic.Int64
+	availableDisk      func(string) (uint64, error)
+	storageMu          sync.RWMutex
+	storage            storageCoverage
+	spacePruned        atomic.Int64
+	lastSpaceCleanup   atomic.Int64
+	lastSpaceAttempt   atomic.Int64
+	reclaimSupported   bool
+	coveredSince       atomic.Int64
+	stopRollupBackfill context.CancelFunc
+	rollupBackfillDone chan struct{}
 }
 
 func sqliteDSN(path, query string) string {
@@ -103,14 +106,32 @@ func openStore(dir string, settings *atomic.Pointer[Settings]) (*Store, error) {
 	}
 	s.spacePruned.Store(count)
 	s.lastSpaceCleanup.Store(int64(last * 1e9))
+	if err = writer.QueryRow(`SELECT (SELECT COUNT(*) FROM events),(SELECT COUNT(*) FROM logs),
+ (SELECT COUNT(*) FROM logs WHERE category='firewall')`).Scan(&s.storage.events.records, &s.storage.logs.records, &count); err != nil {
+		s.close()
+		return nil, err
+	}
+	s.storage.systemLogs = s.storage.logs.records - count
 	if err = s.maintenance(context.Background()); err != nil {
 		s.close()
 		return nil, err
 	}
+	if err = s.initRollups(); err != nil {
+		s.close()
+		return nil, err
+	}
+	s.startRollupBackfill()
 	return s, nil
 }
 
-func (s *Store) close() { _ = s.reader.Close(); _ = s.writer.Close() }
+func (s *Store) close() {
+	if s.stopRollupBackfill != nil {
+		s.stopRollupBackfill()
+		<-s.rollupBackfillDone
+	}
+	_ = s.reader.Close()
+	_ = s.writer.Close()
+}
 func (s *Store) append(ctx context.Context, events []Event) error {
 	if len(events) == 0 {
 		return nil
@@ -165,30 +186,34 @@ func (s *Store) maintenance(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	var removed int64
-	for _, table := range []string{"events", "logs"} {
-		result, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE ts < ?", unixNow()-float64(settings.RetentionDays*86400))
+	cutoff := unixNow() - float64(settings.RetentionDays*86400)
+	coverage := s.coverage()
+	var removed, systemRemoved int64
+	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM logs WHERE ts < ? AND category != 'firewall'", cutoff).Scan(&systemRemoved); err != nil {
+		return err
+	}
+	for _, target := range []struct {
+		name  string
+		table *tableCoverage
+	}{{"events", &coverage.events}, {"logs", &coverage.logs}} {
+		result, err := tx.ExecContext(ctx, "DELETE FROM "+target.name+" WHERE ts < ?", cutoff)
 		if err != nil {
 			return err
 		}
 		n, _ := result.RowsAffected()
+		target.table.records -= n
 		removed += n
 	}
-	var coverage storageCoverage
-	if err = tx.QueryRowContext(ctx, `SELECT
- (SELECT COUNT(*) FROM events)+(SELECT COUNT(*) FROM logs),
- (SELECT MIN(t) FROM (SELECT MIN(ts) t FROM events UNION ALL SELECT MIN(ts) FROM logs)),
- (SELECT MAX(t) FROM (SELECT MAX(ts) t FROM events UNION ALL SELECT MAX(ts) FROM logs))`).Scan(&coverage.Records, &coverage.oldest, &coverage.newest); err != nil {
+	coverage.systemLogs -= systemRemoved
+	if err = coverage.bounds(ctx, tx); err != nil {
 		return err
 	}
 	if err = tx.Commit(); err != nil {
 		return err
 	}
 	s.pruned.Add(removed)
-	s.storageMu.Lock()
-	s.storage = coverage
-	s.storageMu.Unlock()
-	for _, q := range []string{"PRAGMA wal_checkpoint(TRUNCATE)", "PRAGMA incremental_vacuum(256)"} {
+	s.setCoverage(coverage)
+	for _, q := range []string{"PRAGMA wal_checkpoint(PASSIVE)", "PRAGMA incremental_vacuum(256)"} {
 		if _, err = s.writer.ExecContext(ctx, q); err != nil {
 			return err
 		}
@@ -212,6 +237,7 @@ func (s *Store) diskOK() bool {
 
 type Filters struct {
 	Since, Until float64
+	Hours        float64
 	Fields       map[string]any
 	ScanOrder    string
 }
@@ -234,8 +260,31 @@ func (s *Store) events(ctx context.Context, f Filters, limit int, before int64) 
 		where += " AND id < ?"
 		args = append(args, before)
 	}
-	args = append(args, limit)
-	rows, err := s.reader.QueryContext(ctx, "SELECT id,"+eventColumns+","+businessNameSQL+" FROM events WHERE "+where+" ORDER BY id DESC LIMIT ?", args...)
+	// Try a bounded walk in ID order before using the range/filter indexes.
+	// This is cheap for the latest page and preserves ID order even when
+	// timestamps arrive out of order. Sparse filters still get the full query.
+	maxID := "SELECT COALESCE(MAX(id),0) FROM events"
+	var cursorArgs []any
+	if before > 0 {
+		maxID += " WHERE id < ?"
+		cursorArgs = []any{before}
+	}
+	var last int64
+	if err := s.reader.QueryRowContext(ctx, maxID, cursorArgs...).Scan(&last); err != nil {
+		return nil, err
+	}
+	first := last - int64(max(4096, limit*4)) + 1
+	if first > 1 {
+		rows, err := s.readEvents(ctx, "events NOT INDEXED", where+" AND id >= ?", limit, append(args, first))
+		if err != nil || len(rows) == limit {
+			return rows, err
+		}
+	}
+	return s.readEvents(ctx, "events", where, limit, args)
+}
+
+func (s *Store) readEvents(ctx context.Context, table, where string, limit int, args []any) ([]Event, error) {
+	rows, err := s.reader.QueryContext(ctx, "SELECT id,"+eventColumns+","+businessNameSQL+" FROM "+table+" WHERE "+where+" ORDER BY id DESC LIMIT ?", append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}
@@ -300,6 +349,15 @@ func number(v any) float64 {
 	}
 }
 
+func (s *Store) eventCounts(ctx context.Context, f Filters, columns, group string, extra ...any) ([]map[string]any, error) {
+	where, args := f.where()
+	_, sourceFilter := f.Fields["src"]
+	_, portFilter := f.Fields["dport"]
+	from, rangeArgs := s.countInput(eventMinutes, eventMinuteFields, f.Since, f.Until, !sourceFilter && !portFilter)
+	params := append(append([]any{}, extra...), rangeArgs...)
+	return queryMaps(ctx, s.reader, "SELECT "+columns+" FROM "+from+" WHERE "+where+group, append(params, args...)...)
+}
+
 func (s *Store) summary(ctx context.Context, f Filters) (map[string]any, error) {
 	where, args := f.where()
 	bucket := int64(math.Max(60, math.Ceil((f.Until-f.Since)/3600)*60))
@@ -308,23 +366,26 @@ func (s *Store) summary(ctx context.Context, f Filters) (map[string]any, error) 
 		params = append(params, args...)
 		return queryMaps(ctx, s.reader, sql, params...)
 	}
-	totals, err := query("SELECT COUNT(*) observations,COUNT(DISTINCT src) sources,COUNT(DISTINCT dport) ports,COALESCE(SUM(outcome='blocked'),0) blocked,COALESCE(SUM(" + businessExistsSQL + "),0) business FROM events WHERE " + where)
+	totals, err := s.eventCounts(ctx, f, "COALESCE(SUM(weight),0) observations,COALESCE(SUM(weight*(outcome='blocked')),0) blocked", "")
 	if err != nil {
 		return nil, err
 	}
-	trend, err := query("SELECT CAST(ts / ? AS INTEGER) * ? t,COUNT(*) n FROM events WHERE "+where+" GROUP BY t ORDER BY t", bucket, bucket)
+	trend, err := s.eventCounts(ctx, f, "CAST(ts / ? AS INTEGER) * ? t,SUM(weight) n", " GROUP BY t ORDER BY t", bucket, bucket)
 	if err != nil {
 		return nil, err
 	}
-	sources, err := query("SELECT src,COUNT(*) n,COUNT(DISTINCT dport) ports,MAX(ts) last FROM events WHERE " + where + " GROUP BY src ORDER BY n DESC LIMIT 10")
+	sources, err := query(`SELECT src,COUNT(*) n,COUNT(DISTINCT dport) ports,MAX(ts) last,COUNT(*) OVER() source_count
+ FROM events WHERE ` + where + " GROUP BY src ORDER BY n DESC LIMIT 10")
 	if err != nil {
 		return nil, err
 	}
-	ports, err := query("SELECT dport,proto,COUNT(*) n FROM events WHERE " + where + " GROUP BY dport,proto ORDER BY n DESC LIMIT 8")
+	ports, err := query(`WITH port_pairs AS MATERIALIZED (
+ SELECT dport,proto,COUNT(*) n FROM events WHERE ` + where + ` GROUP BY dport,proto
+ ) SELECT dport,proto,n,(SELECT COUNT(DISTINCT dport) FROM port_pairs) port_count FROM port_pairs ORDER BY n DESC,dport,proto LIMIT 8`)
 	if err != nil {
 		return nil, err
 	}
-	wans, err := query("SELECT wan,COUNT(*) n FROM events WHERE " + where + " GROUP BY wan ORDER BY n DESC")
+	wans, err := s.eventCounts(ctx, f, "wan,SUM(weight) n", " GROUP BY wan ORDER BY n DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -351,23 +412,30 @@ func (s *Store) summary(ctx context.Context, f Filters) (map[string]any, error) 
 	if err != nil {
 		return nil, err
 	}
-	businessSources, err := query("SELECT src,COUNT(*) n,COUNT(DISTINCT dport) ports,MAX(ts) last FROM events WHERE " + where + " AND " + businessExistsSQL + " GROUP BY src ORDER BY n DESC,src LIMIT 10")
+	// Iterate the small exact rule set first and look up each source in the
+	// existing (src,ts) event index. The unique rule key prevents double matches.
+	businessEvents := "(SELECT events.* FROM business_rules b CROSS JOIN events INDEXED BY events_source_time ON " + businessMatchSQL + ")"
+	businessSources, err := query("SELECT src,COUNT(*) n,COUNT(DISTINCT dport) ports,MAX(ts) last,SUM(COUNT(*)) OVER() business_count FROM " + businessEvents + " WHERE " + where + " GROUP BY src ORDER BY n DESC,src LIMIT 10")
 	if err != nil {
 		return nil, err
 	}
-	businessPorts, err := query("SELECT dport,proto,COUNT(*) n FROM events WHERE " + where + " AND " + businessExistsSQL + " GROUP BY dport,proto ORDER BY n DESC,dport LIMIT 8")
+	businessPorts, err := query("SELECT dport,proto,COUNT(*) n FROM " + businessEvents + " WHERE " + where + " GROUP BY dport,proto ORDER BY n DESC,dport LIMIT 8")
 	if err != nil {
 		return nil, err
 	}
 	suspiciousPorts := make([]map[string]any, 0)
 	if len(latest) > 0 {
-		terms := make([]string, 0, len(latest))
-		portArgs := append([]any{}, args...)
+		pairs := make([]string, 0, len(latest))
+		portArgs := make([]any, 0, len(latest)*2+len(args))
 		for _, source := range latest {
-			terms = append(terms, "(sender=? AND src=?)")
+			pairs = append(pairs, "(?,?)")
 			portArgs = append(portArgs, source["sender"], source["src"])
 		}
-		suspiciousPorts, err = queryMaps(ctx, s.reader, "SELECT dport,proto,COUNT(*) n FROM events WHERE "+where+" AND direction='inbound' AND NOT "+businessExistsSQL+" AND ("+strings.Join(terms, " OR ")+") GROUP BY dport,proto ORDER BY n DESC,dport LIMIT 8", portArgs...)
+		portArgs = append(portArgs, args...)
+		suspiciousPorts, err = queryMaps(ctx, s.reader, `WITH wanted(device,source) AS (VALUES `+strings.Join(pairs, ",")+`)
+ SELECT dport,proto,COUNT(*) n FROM wanted CROSS JOIN events INDEXED BY events_source_time
+ ON events.sender=wanted.device AND events.src=wanted.source
+ WHERE `+where+` AND direction='inbound' AND NOT `+businessExistsSQL+` GROUP BY dport,proto ORDER BY n DESC,dport LIMIT 8`, portArgs...)
 		if err != nil {
 			return nil, err
 		}
@@ -378,12 +446,8 @@ func (s *Store) summary(ctx context.Context, f Filters) (map[string]any, error) 
 			trafficFields[key] = value
 		}
 	}
-	trafficWhere, trafficArgs := (Filters{Since: f.Since, Until: f.Until, Fields: trafficFields}).where()
-	traffic, err := queryMaps(ctx, s.reader, "SELECT direction,COUNT(*) n FROM events WHERE "+trafficWhere+" GROUP BY direction", trafficArgs...)
-	if err != nil {
-		return nil, err
-	}
-	coverage, err := queryMaps(ctx, s.reader, "SELECT MIN(ts) oldest,MAX(ts) newest,COUNT(*) stored FROM events")
+	trafficFilter := Filters{Since: f.Since, Until: f.Until, Fields: trafficFields}
+	traffic, err := s.eventCounts(ctx, trafficFilter, "direction,SUM(weight) n", " GROUP BY direction")
 	if err != nil {
 		return nil, err
 	}
@@ -395,16 +459,32 @@ func (s *Store) summary(ctx context.Context, f Filters) (map[string]any, error) 
 	for t := int64(f.Since/float64(bucket)) * bucket; t <= int64(f.Until/float64(bucket))*bucket; t += bucket {
 		filled = append(filled, map[string]any{"t": t, "n": indexed[t]})
 	}
-	if len(totals) != 1 || len(coverage) != 1 {
+	if len(totals) != 1 {
 		return nil, errors.New("invalid aggregate result")
 	}
+	totals[0]["sources"] = takeRankTotal(sources, "source_count")
+	totals[0]["ports"] = takeRankTotal(ports, "port_count")
+	totals[0]["business"] = takeRankTotal(businessSources, "business_count")
 	var scanCount any = int64(0)
 	if len(scans) > 0 {
 		scanCount = scans[0]["total"]
 	}
-	return map[string]any{"totals": totals[0], "trend": filled, "sources": sources, "ports": ports, "wans": wans, "scans": scans, "scan_count": scanCount, "latest_scans": latest, "attention": attention, "system_events": systemEvents, "business_sources": businessSources, "business_ports": businessPorts, "suspicious_ports": suspiciousPorts, "traffic": traffic, "coverage": coverage[0], "bucket_seconds": bucket}, nil
+	return map[string]any{"totals": totals[0], "trend": filled, "sources": sources, "ports": ports, "wans": wans, "scans": scans, "scan_count": scanCount, "latest_scans": latest, "attention": attention, "system_events": systemEvents, "business_sources": businessSources, "business_ports": businessPorts, "suspicious_ports": suspiciousPorts, "traffic": traffic, "coverage": s.coverage().events.report(), "bucket_seconds": bucket}, nil
 }
 
+func takeRankTotal(rows []map[string]any, key string) any {
+	if len(rows) == 0 {
+		return int64(0)
+	}
+	total := rows[0][key]
+	for _, row := range rows {
+		delete(row, key)
+	}
+	return total
+}
+
+const queryBudget = 4 * time.Second
+
 func boundedContext(parent context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(parent, 4*time.Second)
+	return context.WithTimeout(parent, queryBudget)
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/csv"
 	"errors"
 	"io"
@@ -14,7 +15,7 @@ import (
 func (a *App) logFilters(r *http.Request) (LogFilters, int64, error) {
 	q := r.URL.Query()
 	h, err := strconv.ParseFloat(valueOr(q.Get("hours"), "12"), 64)
-	f := LogFilters{Until: unixNow(), Fields: map[string]string{}}
+	f := LogFilters{Until: unixNow(), Hours: h, Fields: map[string]string{}}
 	if err != nil || math.IsNaN(h) || math.IsInf(h, 0) || h <= 0 || h > float64(a.settings.Load().RetentionDays*24) {
 		return f, 0, errors.New("invalid hours")
 	}
@@ -74,18 +75,43 @@ func (a *App) logs(w http.ResponseWriter, r *http.Request) {
 		queryError(w)
 		return
 	}
-	summary, err := a.store.logSummary(ctx, f)
-	if err != nil {
-		queryError(w)
-		return
+	result := map[string]any{"coverage": a.store.coverage().logReport(), "status": a.collector.status()}
+	if r.URL.Query().Get("details") != "1" {
+		summary, err := a.store.logSummary(ctx, f)
+		if err != nil {
+			queryError(w)
+			return
+		}
+		for k, v := range summary {
+			result[k] = v
+		}
 	}
 	var next any
 	if len(rows) > 50 {
 		next = rows[49].ID
 		rows = rows[:50]
 	}
-	summary["rows"], summary["next"], summary["status"] = rows, next, a.collector.status()
-	jsonResponse(w, 200, summary)
+	result["rows"], result["next"] = rows, next
+	jsonResponse(w, http.StatusOK, result)
+}
+
+func (a *App) logStatistics(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := a.authorized(w, r); !ok {
+		return
+	}
+	f, _, err := a.logFilters(r)
+	if err != nil {
+		filterError(w)
+		return
+	}
+	key := snapshotKey("logs", f.Hours, f.Fields, f.Search)
+	data := a.serveSnapshot(w, r, "logs", key, func(ctx context.Context, now float64) (map[string]any, error) {
+		f.Since, f.Until = now-f.Hours*3600, now
+		return a.store.logSummary(ctx, f)
+	})
+	if data != nil {
+		jsonResponse(w, http.StatusOK, data)
+	}
 }
 
 func (a *App) exportLogs(w http.ResponseWriter, r *http.Request) {

@@ -19,15 +19,14 @@ const node = (tag, text, cls) => {
 };
 let view = "overview",
   next = null,
-  cursor = null,
-  loading = false,
-  pending = false;
+  cursor = null;
 const filterNames = ["hours", "wan", "scope", "proto", "outcome", "direction"];
 const viewNames = ["overview", "map", "events", "logs", "system", "settings"];
 const settingsTabNames = ["connection", "logs", "account", "notifications", "mqtt"];
 let settingsTab = "connection";
 let receiverState = null, accessCoverage = null, systemCoverage = null, summaryUpdatedAt = null;
 let autoRefresh = true, overviewScroll = 0, eventRequest = null;
+let overviewRequest = null, overviewFilter = null, overviewWaiting = false, statusRequest = null;
 function restoreLocation() {
   const query = new URLSearchParams(location.search);
   for (const key of filterNames) {
@@ -56,7 +55,20 @@ function writeLocation(push = false) {
   window.ROSHome?.filters();
 }
 function updateFilterSummary() {
-  $("filter-summary").replaceChildren(node("span",$("hours").selectedOptions[0].textContent+" · ","filter-range-label"),node("span",summaryUpdatedAt ? "更新于 "+clock(summaryUpdatedAt) : "正在更新…"));
+  const range = $("hours").selectedOptions[0]?.textContent || "";
+  let message = "";
+  if (view === "overview") {
+    const sameFilter = overviewFilter === params().toString();
+    if (sameFilter && summaryUpdatedAt) {
+      const age = Date.now() / 1000 - summaryUpdatedAt;
+      message = (age > 60 ? "上次统计 " : "更新于 ") + clock(summaryUpdatedAt);
+    } else if (overviewWaiting) {
+      message = summaryUpdatedAt ? "正在生成 · 下方为上一次筛选结果" : "正在生成统计…";
+    } else {
+      message = summaryUpdatedAt ? "下方为上一次筛选结果" : "暂无统计结果";
+    }
+  }
+  $("filter-summary").textContent = range + (message ? " · " + message : "");
 }
 function renderReceiverStatus() {
   const notice = $("notice");
@@ -114,8 +126,6 @@ async function api(path, options = {}) {
 function fail(message) {
   $("error-banner").textContent = message;
   $("error-banner").classList.remove("hidden");
-  $("connection").classList.add("stale");
-  $("connection-text").textContent = "刷新失败";
 }
 function showView(name, push = false, keepCursor = false) {
   let requestedTab = null;
@@ -127,6 +137,11 @@ function showView(name, push = false, keepCursor = false) {
   if (!viewNames.includes(name)) name = "overview";
   if(name==="events" && !keepCursor) cursor=null;
   if (view === "overview" && name !== "overview") overviewScroll = window.scrollY;
+  if (view !== name) {
+    overviewRequest?.abort();
+    eventRequest?.abort();
+    $("error-banner").classList.add("hidden");
+  }
   view = name;
   document.body.classList.toggle("map-page", name === "map");
   writeLocation(push);
@@ -155,7 +170,6 @@ function showView(name, push = false, keepCursor = false) {
   $("auto-refresh").classList.toggle("hidden", name === "settings");
   renderReceiverStatus();
   window.ROSMap?.setVisible(name === "map");
-  if (name === "map") refresh();
   document.title = name === "settings" ? "系统设置 · ROS Watch" : "ROS Watch · 网络观察台";
   if (name === "settings") {
     for (const tab of settingsTabNames) {
@@ -167,10 +181,8 @@ function showView(name, push = false, keepCursor = false) {
     }
     window.loadSettings?.();
   }
-  if (name === "logs") refreshLogs(true);
-  if (name === "events") {
-    refreshEvents().catch((e) => fail(e.message));
-  }
+  if (name === "logs") logCursor = null;
+  refresh(true);
 }
 for (const button of document.querySelectorAll("[data-settings-tab]")) {
   button.addEventListener("click", () => showView("settings/" + button.dataset.settingsTab));
@@ -505,8 +517,10 @@ async function refreshEvents() {
   const p = params(true);
   if (cursor) p.set("before", cursor);
   let result;
-  try{result=await api("/api/events?"+p,{signal:request.signal});}catch(error){if(error.name==="AbortError")return;throw error;}
+  try{result=await api("/api/events?"+p,{signal:request.signal});}catch(error){if(error.name==="AbortError"||request!==eventRequest||view!=="events")return;throw error;}
   if(request!==eventRequest||view!=="events")return;
+  $("error-banner").classList.add("hidden");
+  addWans(result.rows.map(row => row.wan));
   const expanded=new Set([...document.querySelectorAll("#events-list .event-row[aria-expanded=true]")].map(row=>row.dataset.eventId));
   const focused=document.activeElement.closest?.(".event-row")?.dataset.eventId;
   next = result.next;
@@ -582,43 +596,83 @@ async function refreshEvents() {
     if(focused===String(r.id))tr.focus({preventScroll:true});
   }
 }
-async function refresh() {
-  if (loading) {
-    pending = true;
-    return;
+function addWans(values) {
+  const select = $("wan");
+  const known = new Set([...select.options].map(option => option.value));
+  for (const value of values) {
+    if (value && !known.has(value)) {
+      select.add(new Option(value, value));
+      known.add(value);
+    }
   }
-  loading = true;
-  document.body.classList.add("loading");
+}
+
+function refreshStatus() {
+  if (!statusRequest) {
+    statusRequest = api("/api/status").then(result => {
+      systemCoverage = result.logs;
+      status(result.status, result.access);
+      addWans(result.wans);
+    }).catch(() => {
+      $("connection").classList.add("stale");
+      $("connection-text").textContent = "接收状态暂不可用";
+    }).finally(() => { statusRequest = null; });
+  }
+  return statusRequest;
+}
+
+async function refreshOverview() {
+  const query = params().toString();
+  if (overviewRequest?.query === query && !overviewRequest.signal.aborted) return;
+  overviewRequest?.abort();
+  const request = new AbortController();
+  request.query = query;
+  overviewRequest = request;
+  overviewWaiting = true;
+  updateFilterSummary();
   try {
-    if (view === "logs") { if (!logCursor) await refreshLogs(); return; }
-    const r = await api("/api/summary?" + params());
-    if (view === "logs") return;
+    const r = await api("/api/summary?" + query + "&async=1", { signal: request.signal });
+    if (request !== overviewRequest || view !== "overview") return;
     $("error-banner").classList.add("hidden");
+    if (r.pending) return;
     $("metric-total").textContent = format(r.totals.observations);
     $("metric-sources").textContent = format(r.totals.sources);
     $("metric-ports").textContent = format(r.totals.ports);
     $("metric-scans").textContent = format(r.scan_count);
     trend(r.trend);
-    scans(r.scans, r.locations,r.status.scan_window);
-    status(r.status, r.coverage);
+    scans(r.scans, r.locations, r.status.scan_window);
     window.ROSHome.render(r);
+    overviewFilter = query;
     summaryUpdatedAt = r.generated_at;
+    overviewWaiting = false;
+    addWans(r.wans.map(row => row.wan));
     updateFilterSummary();
-    for (const w of r.wans)
-      if (![...$("wan").options].some((o) => o.value === w.wan))
-        $("wan").add(new Option(w.wan, w.wan));
-    if (view === "events" && !cursor) await refreshEvents();
-    if (view === "map") await window.ROSMap.refresh();
-  } catch (e) {
-    fail(e.message);
-  } finally {
-    loading = false;
-    document.body.classList.remove("loading");
-    if (pending) {
-      pending = false;
-      refresh();
+  } catch (error) {
+    if (request === overviewRequest && view === "overview" && error.name !== "AbortError") {
+      overviewWaiting = false;
+      updateFilterSummary();
+      fail(error.message);
     }
+  } finally {
+    if (request === overviewRequest) overviewRequest = null;
   }
+}
+
+async function refresh(forcePage = false) {
+  const currentView = view;
+  const receiver = refreshStatus();
+  try {
+    if (currentView === "overview") await refreshOverview();
+    if (currentView === "map") await window.ROSMap.refresh();
+    if (currentView === "events" && (forcePage || !cursor)) await refreshEvents();
+    if (currentView === "logs") {
+      if (forcePage || !logCursor) await refreshLogs();
+      else await refreshLogSummary();
+    }
+  } catch (error) {
+    if (view === currentView && currentView !== "map") fail(error.message);
+  }
+  await receiver;
 }
 document
   .querySelectorAll("[data-view]")
@@ -628,7 +682,6 @@ for (const id of filterNames)
     cursor = null;
     writeLocation(true);
     refresh();
-    if (view === "events") refreshEvents().catch((e) => fail(e.message));
   });
 $("refresh").addEventListener("click", () => {
   if (view === "logs") { refreshLogs(true); return; }
@@ -678,11 +731,10 @@ $("auto-refresh").addEventListener("click",()=>{
 });
 window.addEventListener("DOMContentLoaded", () => {
   const initialView = window.location.hash.slice(1);
-  if (initialView) showView(initialView,false,true);
+  showView(initialView,false,true);
 });
 window.addEventListener("hashchange", () => {restoreLocation();showView(window.location.hash.slice(1),false,true);});
-window.addEventListener("popstate",()=>{restoreLocation();showView(location.hash.slice(1),false,true);refresh();});
-refresh();
+window.addEventListener("popstate",()=>{restoreLocation();showView(location.hash.slice(1),false,true);});
 setInterval(() => {
   if (!document.hidden && autoRefresh) refresh();
 }, 10000);

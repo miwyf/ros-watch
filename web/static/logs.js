@@ -1,5 +1,6 @@
 "use strict";
 let logCursor = null, logNext = null, logRequest = null;
+let logStatsRequest = null, logStatsFilter = null, logStatsUpdatedAt = null;
 const logFields = ["hours", "category", "severity", "event", "device", "username", "source", "q"];
 const logCategoryNames = { login: "登录", config: "配置变更", network: "接口 / 拨号", script: "脚本", system: "系统", firewall: "防火墙", other: "其他" };
 const logEventNames = { success: "登录成功", failure: "登录失败", logout: "退出登录", change: "配置变更", state: "网络状态", reboot: "重启", script: "脚本事件", access: "访问尝试", message: "消息" };
@@ -9,20 +10,55 @@ function logParams() {
   for (const key of logFields) { const value = $("logs-" + key).value.trim(); if (value) p.set(key, value); }
   return p;
 }
-async function refreshLogs(reset = false) {
-  if (reset) logCursor = null;
-  if (logRequest) logRequest.abort();
-  const request = new AbortController(); logRequest = request;
-  const p = logParams(); $("logs-export").href = "/api/logs/export?" + p;
-  if (logCursor) p.set("before", logCursor);
+async function refreshLogSummary() {
+  const query = logParams().toString();
+  if (logStatsRequest?.query === query) return;
+  logStatsRequest?.abort();
+  const request = new AbortController();
+  request.query = query;
+  logStatsRequest = request;
+  if (logStatsFilter !== query) {
+    for (const id of ["logs-total", "logs-failures", "logs-successes", "logs-changes"]) $(id).textContent = "—";
+    $("logs-repeated").replaceChildren();
+    $("logs-stats-time").textContent = "正在生成统计…";
+    logStatsUpdatedAt = null;
+  }
   try {
-    const r = await api("/api/logs?" + p, { signal: request.signal });
-    if (request !== logRequest || view !== "logs") return;
-    $("error-banner").classList.add("hidden");
+    const r = await api("/api/logs/summary?" + query + "&async=1", { signal: request.signal });
+    if (request !== logStatsRequest || view !== "logs" || r.pending) return;
     $("logs-total").textContent = format(r.totals.total);
     $("logs-failures").textContent = format(r.totals.failures);
     $("logs-successes").textContent = format(r.totals.successes);
     $("logs-changes").textContent = format(r.totals.changes) + " / " + format(r.totals.warnings);
+    const repeated = $("logs-repeated");
+    repeated.replaceChildren();
+    for (const f of r.failures) repeated.append(node("p", "连续失败提示：" + f.source + " / " + f.username + "，同一 5 分钟固定窗口内 " + format(f.attempts) + " 次；最后 " + date(f.last), "notice danger"));
+    logStatsFilter = query;
+    logStatsUpdatedAt = r.generated_at;
+    $("logs-stats-time").textContent = (Date.now() / 1000 - logStatsUpdatedAt > 60 ? "上次统计 " : "统计更新于 ") + clock(logStatsUpdatedAt);
+  } catch (error) {
+    if (request === logStatsRequest && view === "logs" && error.name !== "AbortError") {
+      $("logs-stats-time").textContent = logStatsFilter === query && logStatsUpdatedAt
+        ? "上次统计 " + clock(logStatsUpdatedAt) + " · 更新失败"
+        : "统计更新失败";
+    }
+  } finally {
+    if (request === logStatsRequest) logStatsRequest = null;
+  }
+}
+
+async function refreshLogs(reset = false) {
+  if (reset) logCursor = null;
+  refreshLogSummary();
+  if (logRequest) logRequest.abort();
+  const request = new AbortController(); logRequest = request;
+  const p = logParams(); $("logs-export").href = "/api/logs/export?" + p;
+  if (logCursor) p.set("before", logCursor);
+  p.set("details", "1");
+  try {
+    const r = await api("/api/logs?" + p, { signal: request.signal });
+    if (request !== logRequest || view !== "logs") return;
+    $("error-banner").classList.add("hidden");
     logNext = r.next; $("logs-next").disabled = !logNext;
     $("logs-page").textContent = (logCursor ? "较早记录" : "最新记录") + " · " + r.rows.length + " 条";
     $("logs-coverage").textContent = "原始日志 " + format(r.coverage.stored) + " 条；覆盖 " + date(r.coverage.oldest) + " 至 " + date(r.coverage.newest) + "。UDP 可能丢包，与访问记录均按设置的保留天数清理。";
@@ -30,8 +66,6 @@ async function refreshLogs(reset = false) {
     systemCoverage = r.coverage;
     renderReceiverStatus();
     renderStorage(r.status.storage);
-    const repeated = $("logs-repeated"); repeated.replaceChildren();
-    for (const f of r.failures) repeated.append(node("p", "连续失败提示：" + f.source + " / " + f.username + "，同一 5 分钟固定窗口内 " + format(f.attempts) + " 次；最后 " + date(f.last), "notice danger"));
     const expanded=new Set([...document.querySelectorAll("#logs-list .event-row")].filter(row=>row.querySelector('[aria-expanded="true"]')).map(row=>row.dataset.logId));
     const focused=document.activeElement.closest?.("#logs-list .event-row")?.dataset.logId;
     const list = $("logs-list"); list.replaceChildren();
@@ -49,7 +83,7 @@ async function refreshLogs(reset = false) {
       cell.append(node("div","发送设备："+l.sender+"；原设备时间："+(l.device_time||"未注明")+"；类别标记："+(l.topic||"未注明")),node("pre",l.raw));detail.append(cell);list.append(tr,detail);
       if(focused===String(l.id))button.focus({preventScroll:true});
     }
-  } catch (error) { if (error.name !== "AbortError") fail(error.message); }
+  } catch (error) { if (error.name !== "AbortError" && logRequest === request && view === "logs") fail(error.message); }
   finally { if (logRequest === request) logRequest = null; }
 }
 $("logs-form").addEventListener("submit", e => { e.preventDefault(); writeLocation(true); refreshLogs(true); });

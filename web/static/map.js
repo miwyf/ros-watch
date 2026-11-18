@@ -135,12 +135,16 @@ window.ROSMap = (() => {
     const query = params().toString();
     try {
       const [result, value] = await Promise.all([
-        api("/api/map?" + query),
+        api("/api/map?" + query + "&async=1"),
         settingsLoaded ? Promise.resolve(null) : api("/api/map/settings"),
         load(),
       ]);
       if (request !== sequence || !visible) return;
       if (value) { settingsLoaded = true; applyTarget(value); }
+      if (result.pending) {
+        message(lastDataset ? "正在生成地图统计 · 当前显示上一次结果" : "正在生成地图统计…");
+        return;
+      }
       const next = ROSMapData.aggregate(result.sources, result.locations, places, cities, result.scan_ports);
       const dataset = query + "|" + result.scan_ports + "|" + result.scan_window;
       const now = performance.now();
@@ -155,6 +159,7 @@ window.ROSMap = (() => {
         : "当前数据缺少扫描分级依据，来源显示为等级未知。";
       hovered = null;
       buildRoutes(); renderDetails(result.truncated, result.source_limit);
+      if (Date.now() / 1000 - result.generated_at > 60) message("上次统计 " + clock(result.generated_at));
       dirty = true; resize(); wake();
     } catch (error) {
       if (request === sequence && visible) message("地图更新失败：" + error.message);

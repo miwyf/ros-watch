@@ -130,3 +130,41 @@ func TestCollectorOversizeRateAndDiskProtection(t *testing.T) {
 }
 
 func mustLoopback() netip.Addr { return netip.MustParseAddr("127.0.0.1") }
+
+func TestEventsLatestPageKeepsSparseFiltersAndIDOrder(t *testing.T) {
+	a := testApp(t)
+	now := unixNow()
+	const common = "192.0.2.1"
+	const rare = "192.0.2.2"
+	ctx := context.Background()
+	if _, err := a.store.writer.ExecContext(ctx, `
+ WITH RECURSIVE ids(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM ids WHERE i<4200)
+ INSERT INTO events(ts,sender,src,dport,dst,proto,flags,wan,interface,scope,outcome,raw,direction)
+ SELECT CASE WHEN i%2=0 THEN ? ELSE ? END, 'router',
+        CASE WHEN i IN (3, 4200) THEN ? ELSE ? END,22,'192.0.2.22','TCP','','WAN1','eth1','router','attempt','','inbound'
+ FROM ids`, now-60, now-120, rare, common); err != nil {
+		t.Fatal(err)
+	}
+	f := Filters{Since: now - 3600, Until: now, Fields: map[string]any{"direction": "inbound"}}
+	check := func(f Filters, before int64, want ...int64) {
+		t.Helper()
+		page, err := a.store.events(ctx, f, 2, before)
+		if err != nil || len(page) != len(want) {
+			t.Fatalf("page length or error: got %d, want %d, err=%v", len(page), len(want), err)
+		}
+		for i, event := range page {
+			if event.ID != want[i] {
+				t.Fatalf("ID %d = %d, want %d", i, event.ID, want[i])
+			}
+		}
+	}
+	check(f, 0, 4200, 4199)
+	check(f, 4199, 4198, 4197)
+	f.Fields["src"] = rare
+	check(f, 0, 4200, 3)
+	check(f, 4200, 3)
+	f.Until = now - 90
+	check(f, 0, 3)
+	f.Fields["src"] = "192.0.2.3"
+	check(f, 0)
+}

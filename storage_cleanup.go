@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"time"
 )
 
@@ -40,9 +39,7 @@ func (s *Store) ensureDiskSpace(ctx context.Context) bool {
 		if !s.reclaimSupported || size <= 0 || uint64(size) <= minimum-free {
 			return false
 		}
-		s.storageMu.RLock()
-		records := s.storage.Records
-		s.storageMu.RUnlock()
+		records := s.coverage().records()
 		if records == 0 {
 			return false
 		}
@@ -95,14 +92,22 @@ func (s *Store) deleteOldestForSpace(ctx context.Context, limit int64) (int64, e
 	if err != nil {
 		return 0, err
 	}
-	var removed int64
-	for _, table := range []string{"events", "logs"} {
-		r, e := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE id IN (SELECT id FROM space_rows WHERE kind=?)", table)
+	coverage := s.coverage()
+	var removed, systemRemoved int64
+	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM logs WHERE id IN (SELECT id FROM space_rows WHERE kind='logs') AND category != 'firewall'").Scan(&systemRemoved); err != nil {
+		return 0, err
+	}
+	for _, target := range []struct {
+		name  string
+		table *tableCoverage
+	}{{"events", &coverage.events}, {"logs", &coverage.logs}} {
+		r, e := tx.ExecContext(ctx, "DELETE FROM "+target.name+" WHERE id IN (SELECT id FROM space_rows WHERE kind=?)", target.name)
 		if e != nil {
 			return 0, e
 		}
 		n, _ := r.RowsAffected()
 		removed += n
+		target.table.records -= n
 	}
 	now := unixNow()
 	if removed > 0 {
@@ -110,18 +115,14 @@ func (s *Store) deleteOldestForSpace(ctx context.Context, limit int64) (int64, e
 			return 0, err
 		}
 	}
-	var oldest, newest sql.NullFloat64
-	if err = tx.QueryRowContext(ctx, `SELECT (SELECT MIN(t) FROM (SELECT MIN(ts) t FROM events UNION ALL SELECT MIN(ts) FROM logs)),(SELECT MAX(t) FROM (SELECT MAX(ts) t FROM events UNION ALL SELECT MAX(ts) FROM logs))`).Scan(&oldest, &newest); err != nil {
+	coverage.systemLogs -= systemRemoved
+	if err = coverage.bounds(ctx, tx); err != nil {
 		return 0, err
 	}
 	if err = tx.Commit(); err != nil {
 		return 0, err
 	}
-	s.storageMu.Lock()
-	s.storage.Records -= removed
-	s.storage.oldest = oldest
-	s.storage.newest = newest
-	s.storageMu.Unlock()
+	s.setCoverage(coverage)
 	if removed > 0 {
 		s.spacePruned.Add(removed)
 		s.lastSpaceCleanup.Store(int64(now * 1e9))

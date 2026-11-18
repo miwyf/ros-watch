@@ -18,6 +18,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,30 +45,30 @@ type authAttempt struct {
 	times []time.Time
 	last  time.Time
 }
-type cachedSummary struct {
-	value map[string]any
-	at    time.Time
-}
 
 type App struct {
-	config        Config
-	settings      atomic.Pointer[Settings]
-	control       *Control
-	store         *Store
-	collector     *Collector
-	notifier      *Notifier
-	mqtt          *MQTTPublisher
-	geo           *GeoLookup
-	templates     *template.Template
-	cookies       *securecookie.SecureCookie
-	authMu        sync.Mutex
-	attempts      map[string]authAttempt
-	totalAttempts []time.Time
-	settingsMu    sync.Mutex
-	queryMu       sync.Mutex
-	cache         map[string]cachedSummary
-	requests      chan struct{}
-	expensive     chan struct{}
+	config         Config
+	settings       atomic.Pointer[Settings]
+	control        *Control
+	store          *Store
+	collector      *Collector
+	notifier       *Notifier
+	mqtt           *MQTTPublisher
+	geo            *GeoLookup
+	templates      *template.Template
+	cookies        *securecookie.SecureCookie
+	authMu         sync.Mutex
+	attempts       map[string]authAttempt
+	totalAttempts  []time.Time
+	settingsMu     sync.Mutex
+	queryMu        sync.Mutex
+	cache          map[string]*cachedSummary
+	snapshotCtx    context.Context
+	snapshotCancel context.CancelFunc
+	snapshotWork   chan snapshotJob
+	snapshotWG     sync.WaitGroup
+	requests       chan struct{}
+	expensive      chan struct{}
 }
 
 func newApp(config Config) (*App, error) {
@@ -80,7 +81,7 @@ func newApp(config Config) (*App, error) {
 		control.db.Close()
 		return nil, err
 	}
-	a := &App{config: config, control: control, attempts: map[string]authAttempt{}, cache: map[string]cachedSummary{}, requests: make(chan struct{}, 32), expensive: make(chan struct{}, 2)}
+	a := &App{config: config, control: control, attempts: map[string]authAttempt{}, cache: map[string]*cachedSummary{}, requests: make(chan struct{}, 32), expensive: make(chan struct{}, 2)}
 	a.settings.Store(&settings)
 	a.store, err = openStore(config.DataDir, &a.settings)
 	if err != nil {
@@ -130,10 +131,15 @@ func newApp(config Config) (*App, error) {
 		return nil, err
 	}
 	a.mqtt = newMQTTPublisher(a, mqttSettings)
+	a.startSnapshots()
 	return a, nil
 }
 
 func (a *App) close() {
+	if a.snapshotCancel != nil {
+		a.snapshotCancel()
+		a.snapshotWG.Wait()
+	}
 	if a.mqtt != nil {
 		a.mqtt.close()
 	}
@@ -178,6 +184,7 @@ func (a *App) handler() http.Handler {
 	mux.HandleFunc("POST /api/mqtt/publish", a.publishMQTT)
 	mux.HandleFunc("GET /api/mqtt/dashboard", a.mqttDashboard)
 	mux.HandleFunc("POST /api/routeros-script", a.routerOSScript)
+	mux.HandleFunc("GET /api/status", a.receiverStatus)
 	mux.HandleFunc("GET /api/summary", a.summary)
 	mux.HandleFunc("GET /api/map", a.accessMap)
 	mux.HandleFunc("GET /api/map/settings", a.mapSettings)
@@ -187,6 +194,7 @@ func (a *App) handler() http.Handler {
 	mux.HandleFunc("GET /api/events", a.events)
 	mux.HandleFunc("GET /api/export", a.export)
 	mux.HandleFunc("GET /api/logs", a.logs)
+	mux.HandleFunc("GET /api/logs/summary", a.logStatistics)
 	mux.HandleFunc("GET /api/logs/export", a.exportLogs)
 	static, _ := fs.Sub(assets, "web/static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
@@ -605,9 +613,7 @@ func (a *App) runtimeSettings(w http.ResponseWriter, r *http.Request) {
 	err = a.control.saveSettings(ctx, settings)
 	if err == nil {
 		a.settings.Store(&settings)
-		a.queryMu.Lock()
-		clear(a.cache)
-		a.queryMu.Unlock()
+		a.clearSnapshots()
 		select {
 		case a.collector.maintenance <- struct{}{}:
 		default:
@@ -629,7 +635,7 @@ func (a *App) filters(r *http.Request) (Filters, error) {
 		return Filters{}, errors.New("时间范围超出保留期限")
 	}
 	now := unixNow()
-	f := Filters{Since: now - hours*3600, Until: now, Fields: map[string]any{}}
+	f := Filters{Since: now - hours*3600, Until: now, Hours: hours, Fields: map[string]any{}}
 	f.ScanOrder = valueOr(q.Get("scan_order"), "latest")
 	if f.ScanOrder != "latest" && f.ScanOrder != "ports" && f.ScanOrder != "count" {
 		return f, errors.New("invalid scan order")
@@ -689,6 +695,22 @@ func queryError(w http.ResponseWriter) {
 	apiError(w, 503, "查询暂不可用，请缩小时间范围后重试")
 }
 
+func (a *App) receiverStatus(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := a.authorized(w, r); !ok {
+		return
+	}
+	coverage := a.store.coverage()
+	wans := make([]string, 0, len(a.settings.Load().WANMap))
+	for _, name := range a.settings.Load().WANMap {
+		wans = append(wans, name)
+	}
+	slices.Sort(wans)
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"status": a.collector.status(), "access": coverage.events.report(), "logs": coverage.logReport(),
+		"wans": slices.Compact(wans),
+	})
+}
+
 func (a *App) summary(w http.ResponseWriter, r *http.Request) {
 	if _, _, ok := a.authorized(w, r); !ok {
 		return
@@ -698,43 +720,12 @@ func (a *App) summary(w http.ResponseWriter, r *http.Request) {
 		filterError(w)
 		return
 	}
-	if !a.acquireQuery(w) {
-		return
-	}
-	defer func() { <-a.expensive }()
-	ctx, cancel := boundedContext(r.Context())
-	defer cancel()
-	fields, _ := json.Marshal(f.Fields)
-	key := strconv.FormatInt(int64(f.Since)/10, 10) + ":" + strconv.FormatInt(int64(f.Until)/10, 10) + string(fields) + ":" + f.ScanOrder
-	a.queryMu.Lock()
-	cached, ok := a.cache[key]
-	var data map[string]any
-	if ok && time.Since(cached.at) < 10*time.Second {
-		data = cached.value
-	} else {
-		if ctx.Err() == nil {
-			data, err = a.store.summary(ctx, f)
-		} else {
-			err = ctx.Err()
-		}
-		if err == nil {
-			if len(a.cache) >= 32 {
-				oldKey := ""
-				oldAt := time.Now()
-				for k, v := range a.cache {
-					if v.at.Before(oldAt) {
-						oldKey = k
-						oldAt = v.at
-					}
-				}
-				delete(a.cache, oldKey)
-			}
-			a.cache[key] = cachedSummary{data, time.Now()}
-		}
-	}
-	a.queryMu.Unlock()
-	if err != nil {
-		queryError(w)
+	key := snapshotKey("overview", f.Hours, f.Fields, f.ScanOrder)
+	data := a.serveSnapshot(w, r, "overview", key, func(ctx context.Context, now float64) (map[string]any, error) {
+		f.Since, f.Until = now-f.Hours*3600, now
+		return a.store.summary(ctx, f)
+	})
+	if data == nil {
 		return
 	}
 	response := make(map[string]any, len(data)+2)
@@ -742,7 +733,6 @@ func (a *App) summary(w http.ResponseWriter, r *http.Request) {
 		response[k] = v
 	}
 	response["status"] = a.collector.status()
-	response["generated_at"] = unixNow()
 	response["locations"] = a.locations(data["sources"].([]map[string]any), data["scans"].([]map[string]any), data["latest_scans"].([]map[string]any), data["business_sources"].([]map[string]any), data["attention"].([]map[string]any))
 	response["geo"] = map[string]any{"available": a.geo != nil, "source": "ip2region", "version": geoDataVersion}
 	jsonResponse(w, 200, response)

@@ -16,6 +16,7 @@ CREATE INDEX IF NOT EXISTS logs_attention_time ON logs(ts) WHERE (category='conf
 
 type LogFilters struct {
 	Since, Until float64
+	Hours        float64
 	Fields       map[string]string
 	Search       string
 }
@@ -74,7 +75,15 @@ func (s *Store) logs(ctx context.Context, f LogFilters, limit int, before int64)
 }
 func (s *Store) logSummary(ctx context.Context, f LogFilters) (map[string]any, error) {
 	w, a := f.where()
-	totals, err := queryMaps(ctx, s.reader, `SELECT COUNT(*) total,COALESCE(SUM(event='failure'),0) failures,COALESCE(SUM(event='success'),0) successes,COALESCE(SUM(category='config'),0) changes,COALESCE(SUM(severity IN ('warning','error','critical','alert','emergency')),0) warnings FROM logs WHERE `+w, a...)
+	eligible := f.Search == "" && f.Fields["username"] == "" && f.Fields["source"] == "" &&
+		f.Fields["sender"] == "" && f.Fields["device"] == ""
+	from, rangeArgs := s.countInput(logMinutes, logMinuteFields, f.Since, f.Until, eligible)
+	totals, err := queryMaps(ctx, s.reader, `SELECT COALESCE(SUM(weight),0) total,
+ COALESCE(SUM(weight*(event='failure')),0) failures,
+ COALESCE(SUM(weight*(event='success')),0) successes,
+ COALESCE(SUM(weight*(category='config')),0) changes,
+ COALESCE(SUM(weight*(severity IN ('warning','error','critical','alert','emergency'))),0) warnings
+ FROM `+from+" WHERE "+w, append(rangeArgs, a...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -83,13 +92,5 @@ func (s *Store) logSummary(ctx context.Context, f LogFilters) (map[string]any, e
 	if err != nil {
 		return nil, err
 	}
-	coverage, err := queryMaps(ctx, s.reader, `SELECT
- (SELECT MIN(ts) FROM logs) oldest,
- (SELECT MAX(ts) FROM logs) newest,
- (SELECT COUNT(*) FROM logs) stored,
- (SELECT COUNT(*) FROM logs)-(SELECT COUNT(*) FROM logs WHERE category='firewall') system_logs`)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"totals": totals[0], "failures": failures, "coverage": coverage[0]}, nil
+	return map[string]any{"totals": totals[0], "failures": failures, "coverage": s.coverage().logReport()}, nil
 }

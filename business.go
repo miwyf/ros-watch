@@ -132,9 +132,7 @@ func (a *App) businessRules(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		a.queryMu.Lock()
-		clear(a.cache)
-		a.queryMu.Unlock()
+		a.clearSnapshots()
 	}
 	rules, err := a.store.businessRules(ctx)
 	if err != nil {

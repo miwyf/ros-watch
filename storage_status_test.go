@@ -135,3 +135,43 @@ func TestSettingsExposeDaysAndReadOnlyStorage(t *testing.T) {
 		t.Fatal("storage status panel missing")
 	}
 }
+
+func TestCoverageFollowsRetentionAndSpacePruning(t *testing.T) {
+	a := testApp(t)
+	ctx := context.Background()
+	now := unixNow()
+	log := func(ts float64, category string) Event {
+		return Event{Log: &LogEvent{TS: ts, Category: category}}
+	}
+	event := *sampleEvent(22)
+	event.TS = now - 60
+	if err := a.store.append(ctx, []Event{
+		log(now-8*86400, "login"), log(now-200, "firewall"), log(now-100, "system"), event,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := func(events, logs, system int64, oldest float64) {
+		t.Helper()
+		coverage := a.store.coverage()
+		if coverage.events.records != events || coverage.logs.records != logs || coverage.systemLogs != system ||
+			!coverage.logs.oldest.Valid || coverage.logs.oldest.Float64 != oldest {
+			t.Fatalf("wrong storage coverage %+v", coverage)
+		}
+	}
+	want(1, 3, 2, now-8*86400)
+	if err := a.store.maintenance(ctx); err != nil {
+		t.Fatal(err)
+	}
+	want(1, 2, 1, now-200)
+	if n, err := a.store.deleteOldestForSpace(ctx, 1); err != nil || n != 1 {
+		t.Fatal("space prune failed", n, err)
+	}
+	want(1, 1, 1, now-100)
+	if n, err := a.store.deleteOldestForSpace(ctx, 1); err != nil || n != 1 {
+		t.Fatal("second space prune failed", n, err)
+	}
+	coverage := a.store.coverage()
+	if coverage.logs.records != 0 || coverage.logs.oldest.Valid || coverage.logs.newest.Valid || coverage.systemLogs != 0 || coverage.events.records != 1 {
+		t.Fatalf("wrong coverage after pruning the last log %+v", coverage)
+	}
+}
