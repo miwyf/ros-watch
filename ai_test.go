@@ -272,9 +272,47 @@ func TestAIChatFromScanToReputationAndLogin(t *testing.T) {
 		}
 	}
 	other := browser(t, a)
+	path := "/api/ai/conversations/" + conversation
+	if code, _ := other.request(t, "GET", path, nil, false); code != 401 {
+		t.Fatalf("unauthenticated history read: %d", code)
+	}
 	other.login(t, "admin", "test-account-password")
-	if code, _ := other.request(t, "POST", "/api/ai/chat", map[string]string{"question": "检查", "conversation": conversation}, true); code != 409 {
-		t.Fatal("conversation leaked across logins")
+	if code, body := other.request(t, "GET", "/api/ai/conversations", nil, false); code != 200 ||
+		!strings.Contains(string(body), conversation) || !strings.Contains(string(body), `"title":"保加利亚扫描"`) {
+		t.Fatalf("history list: %d %s", code, body)
+	}
+	if code, body := other.request(t, "GET", path, nil, false); code != 200 || !strings.Contains(string(body), `"can_resume":true`) ||
+		!strings.Contains(string(body), "spamhaus.org") || !strings.Contains(string(body), `"block_sources":["79.124.62.10"]`) ||
+		strings.Contains(string(body), "tool_calls") || strings.Contains(string(body), "saved-model-key") {
+		t.Fatalf("restored history: %d %s", code, body)
+	}
+	continuation := map[string]string{"question": "给我ros的封锁指令", "conversation": conversation}
+	if code, body := other.request(t, "POST", "/api/ai/chat", continuation, true); code != 200 ||
+		!strings.Contains(string(body), `"block_sources":["79.124.62.10"]`) {
+		t.Fatalf("resume after signing in again: %d %s", code, body)
+	}
+	config.Profiles[0].Model = "different-model"
+	if code, body := b.request(t, "POST", "/api/ai/settings", config, true); code != 200 {
+		t.Fatalf("change model: %d %s", code, body)
+	}
+	if code, body := b.request(t, "GET", path, nil, false); code != 200 || !strings.Contains(string(body), `"can_resume":false`) {
+		t.Fatalf("archived history after model change: %d %s", code, body)
+	}
+	if code, _ := b.request(t, "POST", "/api/ai/chat", continuation, true); code != 409 {
+		t.Fatalf("conversation was forwarded to a changed connection: %d", code)
+	}
+	if code, _ := b.request(t, "DELETE", path, nil, false); code != 400 {
+		t.Fatalf("history delete without CSRF: %d", code)
+	}
+	if code, _ := b.request(t, "DELETE", path, nil, true); code != 200 {
+		t.Fatalf("history delete: %d", code)
+	}
+	if code, _ := other.request(t, "GET", path, nil, false); code != 404 {
+		t.Fatalf("deleted history still readable: %d", code)
+	}
+	var count int
+	if err := a.control.db.QueryRow("SELECT count(*) FROM ai_turns WHERE conversation_id=?", conversation).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("deleting the conversation left saved turns: %d %v", count, err)
 	}
 	if _, _, err := a.ai.ipReputation(context.Background(), aiArguments{Sources: []string{"192.168.1.10"}}, config.Reputation); err == nil {
 		t.Fatal("private IP allowed in external lookup")

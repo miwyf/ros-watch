@@ -83,7 +83,7 @@ func openControl(dir string) (*Control, error) {
 		return nil, err
 	}
 	path := filepath.Join(dir, "control.sqlite3")
-	db, err := sql.Open("sqlite", sqliteDSN(path, "_pragma=busy_timeout(5000)"))
+	db, err := sql.Open("sqlite", sqliteDSN(path, "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"))
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,17 @@ func openControl(dir string) (*Control, error) {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS account(id INTEGER PRIMARY KEY CHECK(id=1),username TEXT NOT NULL,password_hash TEXT NOT NULL,revision TEXT NOT NULL,updated_at REAL NOT NULL);
  CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1),value TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS map_settings(id INTEGER PRIMARY KEY CHECK(id=1),value TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS ai_settings(id INTEGER PRIMARY KEY CHECK(id=1),value TEXT NOT NULL);`)
+ CREATE TABLE IF NOT EXISTS ai_settings(id INTEGER PRIMARY KEY CHECK(id=1),value TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS ai_conversations(
+   id TEXT PRIMARY KEY, title TEXT NOT NULL, profile TEXT NOT NULL, profile_hash BLOB NOT NULL,
+   updated_at REAL NOT NULL, last_turn INTEGER NOT NULL, context TEXT NOT NULL
+ );
+ CREATE INDEX IF NOT EXISTS ai_conversations_recent ON ai_conversations(last_turn DESC);
+ CREATE TABLE IF NOT EXISTS ai_turns(
+   id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
+   question TEXT NOT NULL, reply TEXT NOT NULL
+ );
+ CREATE INDEX IF NOT EXISTS ai_turns_conversation ON ai_turns(conversation_id, id DESC);`)
 	if err == nil {
 		value, _ := json.Marshal(defaultSettings())
 		_, err = db.Exec("INSERT INTO settings VALUES(1,?) ON CONFLICT(id) DO NOTHING", string(value))

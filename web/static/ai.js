@@ -34,8 +34,17 @@
   const customKey = byId("ai-custom-key");
   const customTest = byId("ai-custom-test");
   const customStatus = byId("ai-custom-result");
+  const historyDialog = byId("ai-history-dialog");
+  const historyList = byId("ai-history-list");
+  const historyStatus = byId("ai-history-status");
+  const historyMore = byId("ai-history-more");
+  const olderMessages = byId("ai-older-messages");
+  const historyPath = "/api/ai/conversations";
+  const selectionKey = "ros-watch-ai-conversation";
   let settings, loading, draft, editing, configBusy = false;
   let conversation = "", pending = null;
+  let historyBusy = false, historyRestored = false, canResume = true;
+  let historyBefore = 0, messagesBefore = 0;
   let modelRequest = null;
 
   function messageStatus(element, text, error = false) {
@@ -70,15 +79,20 @@
   }
 
   function buttons() {
-    byId("ai-send").disabled = !!pending || !model.value || !question.value.trim();
+    const busy = !!pending || historyBusy;
+    byId("ai-send").disabled = busy || !canResume || !model.value || !question.value.trim();
     byId("ai-stop").classList.toggle("hidden", !pending);
-    model.disabled = !!pending || !settings?.profiles.length;
-    byId("ai-new").disabled = !!pending;
-    byId("ai-configure").disabled = !!pending;
+    model.disabled = busy || !settings?.profiles.length;
+    for (const id of ["ai-history", "ai-new", "ai-configure", "ai-older-messages"])
+      byId(id).disabled = busy;
+    for (const button of historyDialog.querySelectorAll("button")) button.disabled = historyBusy;
   }
 
   function resetConversation() {
     conversation = "";
+    canResume = true;
+    messagesBefore = 0;
+    olderMessages.classList.add("hidden");
     messages.replaceChildren();
     byId("ai-welcome").classList.remove("hidden");
     messageStatus(status, "");
@@ -92,7 +106,10 @@
     options(model, settings.profiles, selected?.id, "未配置");
     const sameModel = previous && selected && previous.id === selected.id
       && previous.base_url === selected.base_url && previous.model === selected.model;
-    if (!sameModel) resetConversation();
+    if (!sameModel) {
+      if (conversation) rememberConversation("");
+      resetConversation();
+    }
     byId("ai-welcome-copy").textContent = selected
       ? "按时间、来源和端口分析访问记录，或追问上一轮结果。"
       : "先配置一个支持工具调用的模型连接。";
@@ -367,7 +384,11 @@
     messageStatus(configStatus, "保存中…");
     try {
       setSettings(await post("/api/ai/settings", draft));
-      if (changedKey && !pending) resetConversation();
+      if (changedKey && conversation) {
+        rememberConversation("");
+        resetConversation();
+        buttons();
+      }
       loadDialog(editing);
       messageStatus(configStatus, "已保存");
     } catch (error) {
@@ -422,7 +443,7 @@
     }
   });
 
-  function addMessage(role, title, content, evidence = [], sources = []) {
+  function renderMessage(role, title, content, evidence = [], sources = []) {
     const box = document.createElement("article");
     box.className = "ai-message " + role;
     const label = document.createElement("strong");
@@ -457,19 +478,149 @@
       }
       box.append(refs);
     }
-    messages.append(box);
-    thread.scrollTop = thread.scrollHeight;
     return box;
   }
+
+  function renderReply(reply) {
+    return renderMessage("assistant", reply.model, reply.answer, reply.evidence || [], reply.block_sources || []);
+  }
+
+  function renderSavedTurns(items) {
+    const content = document.createDocumentFragment();
+    for (const item of items) {
+      content.append(renderMessage("user", "你", item.question), renderReply(item.reply));
+    }
+    return content;
+  }
+
+  function rememberConversation(id) {
+    try { sessionStorage.setItem(selectionKey, id); } catch {}
+  }
+
+  function conversationPath(id, before = 0) {
+    return `${historyPath}/${encodeURIComponent(id)}${before ? "?before=" + before : ""}`;
+  }
+
+  async function historyAction(action, resultStatus = historyStatus) {
+    if (pending || historyBusy) return;
+    historyBusy = true;
+    buttons();
+    messageStatus(resultStatus, "");
+    try {
+      await action();
+    } catch (error) {
+      messageStatus(resultStatus, error.message, true);
+    } finally {
+      historyBusy = false;
+      buttons();
+    }
+  }
+
+  async function openConversation(id) {
+    const saved = await api(conversationPath(id));
+    conversation = saved.conversation.id;
+    rememberConversation(conversation);
+    canResume = saved.can_resume;
+    model.value = saved.conversation.profile;
+    messages.replaceChildren(renderSavedTurns(saved.items));
+    messagesBefore = saved.before || 0;
+    olderMessages.classList.toggle("hidden", !messagesBefore);
+    byId("ai-welcome").classList.add("hidden");
+    messageStatus(status, canResume ? "" : "原模型连接已变更。可以查看历史，新建对话可继续分析。");
+    thread.scrollTop = thread.scrollHeight;
+    if (historyDialog.open) historyDialog.close();
+  }
+
+  async function deleteConversation(item, row) {
+    if (!window.confirm(`删除「${item.title}」及其中的所有消息？`)) return;
+    await api(conversationPath(item.id), {
+      method:"DELETE", headers:{"X-CSRF-Token":document.querySelector('meta[name="csrf-token"]').content},
+    });
+    if (conversation === item.id) {
+      rememberConversation("");
+      resetConversation();
+      if (!model.value) model.value = settings.default_profile || settings.profiles[0]?.id || "";
+    }
+    row.remove();
+    messageStatus(historyStatus, !historyList.children.length && !historyBefore ? "还没有保存的对话" : "已删除");
+  }
+
+  async function loadHistoryPage(before = 0) {
+    const page = await api(historyPath + (before ? "?before=" + before : ""));
+    if (!before) historyList.replaceChildren();
+    for (const item of page.items) {
+      const row = document.createElement("li");
+      row.className = "ai-history-row";
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "text-button";
+      open.textContent = item.title;
+      if (item.id === conversation) open.setAttribute("aria-current", "true");
+      const time = new Date(item.updated_at * 1000);
+      const timestamp = document.createElement("time");
+      timestamp.dateTime = time.toISOString();
+      timestamp.textContent = time.toLocaleString();
+      open.append(timestamp);
+      open.addEventListener("click", () => historyAction(() => openConversation(item.id)));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "outline-button";
+      remove.textContent = "删除";
+      remove.setAttribute("aria-label", `删除会话 ${item.title}`);
+      remove.addEventListener("click", () => historyAction(() => deleteConversation(item, row)));
+      row.append(open, remove);
+      historyList.append(row);
+    }
+    historyBefore = page.before || 0;
+    historyMore.classList.toggle("hidden", !historyBefore);
+    if (!historyList.children.length) messageStatus(historyStatus, "还没有保存的对话");
+  }
+
+  async function restoreConversation() {
+    let last = null;
+    try { last = sessionStorage.getItem(selectionKey); } catch {}
+    if (last === "") return;
+    if (last) {
+      try {
+        await openConversation(last);
+        return;
+      } catch {
+        // A different tab may have deleted the selected conversation.
+      }
+    }
+    const page = await api(historyPath);
+    if (page.items.length) await openConversation(page.items[0].id);
+  }
+
+  byId("ai-history").addEventListener("click", () => {
+    if (historyBusy || pending || historyDialog.open) return;
+    historyList.replaceChildren();
+    historyMore.classList.add("hidden");
+    historyDialog.showModal();
+    historyAction(() => loadHistoryPage());
+  });
+  byId("ai-history-close").addEventListener("click", () => historyDialog.close());
+  historyDialog.addEventListener("cancel", event => { if (historyBusy) event.preventDefault(); });
+  historyMore.addEventListener("click", () => historyAction(() => loadHistoryPage(historyBefore)));
+  olderMessages.addEventListener("click", () => historyAction(async () => {
+    const page = await api(conversationPath(conversation, messagesBefore));
+    const before = thread.scrollHeight - thread.scrollTop;
+    messages.prepend(renderSavedTurns(page.items));
+    messagesBefore = page.before || 0;
+    olderMessages.classList.toggle("hidden", !messagesBefore);
+    thread.scrollTop = thread.scrollHeight - before;
+  }, status));
 
   byId("ai-chat-form").addEventListener("submit", async event => {
     event.preventDefault();
     const text = question.value.trim();
-    if (!text || !model.value || pending) return;
+    if (!text || !model.value || pending || historyBusy || !canResume) return;
     const controller = new AbortController();
     pending = controller;
     byId("ai-welcome").classList.add("hidden");
-    const userMessage = addMessage("user", "你", text);
+    const userMessage = renderMessage("user", "你", text);
+    messages.append(userMessage);
+    thread.scrollTop = thread.scrollHeight;
     question.value = "";
     messageStatus(status, "正在查询并分析…");
     buttons();
@@ -478,7 +629,9 @@
         conversation, profile:model.value, question:text, timezone_offset_minutes:-new Date().getTimezoneOffset(),
       }, controller.signal);
       conversation = res.conversation;
-      addMessage("assistant", res.model, res.answer, res.evidence || [], res.block_sources || []);
+      rememberConversation(conversation);
+      messages.append(renderReply(res));
+      thread.scrollTop = thread.scrollHeight;
       messageStatus(status, "");
     } catch (error) {
       userMessage.remove();
@@ -499,16 +652,32 @@
     }
   });
   document.querySelectorAll("[data-ai-prompt]").forEach(button => button.addEventListener("click", () => {
-    if (pending) return;
+    if (pending || historyBusy) return;
     question.value = button.dataset.aiPrompt;
     buttons();
     question.focus();
   }));
-  model.addEventListener("change", () => { resetConversation(); buttons(); });
+  model.addEventListener("change", () => { rememberConversation(""); resetConversation(); buttons(); });
   byId("ai-configure").addEventListener("click", openDialog);
-  byId("ai-new").addEventListener("click", () => { resetConversation(); question.value=""; buttons(); question.focus(); });
+  byId("ai-new").addEventListener("click", () => {
+    rememberConversation("");
+    resetConversation();
+    if (!model.value) model.value = settings?.default_profile || settings?.profiles[0]?.id || "";
+    question.value = "";
+    buttons();
+    question.focus();
+  });
   byId("ai-stop").addEventListener("click", () => pending?.abort());
 
-  window.ROSAI = {enter:() => loadSettings().catch(e => messageStatus(status, e.message, true))};
+  window.ROSAI = {enter:async () => {
+    try {
+      await loadSettings();
+      if (historyRestored) return;
+      historyRestored = true;
+      await historyAction(restoreConversation, status);
+    } catch (error) {
+      messageStatus(status, error.message, true);
+    }
+  }};
   if (view === "ai") window.ROSAI.enter();
 })();

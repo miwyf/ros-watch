@@ -203,6 +203,9 @@ func (a *App) handler() http.Handler {
 	mux.HandleFunc("POST /api/ai/test", a.aiConnectionTest)
 	mux.HandleFunc("POST /api/ai/reputation/custom/test", a.aiCustomIntelTest)
 	mux.HandleFunc("POST /api/ai/chat", a.aiChat)
+	mux.HandleFunc("GET /api/ai/conversations", a.aiHistoryList)
+	mux.HandleFunc("GET /api/ai/conversations/{id}", a.aiHistoryDetail)
+	mux.HandleFunc("DELETE /api/ai/conversations/{id}", a.aiHistoryDelete)
 	static, _ := fs.Sub(assets, "web/static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

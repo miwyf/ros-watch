@@ -3,6 +3,7 @@
     <div class="ai-toolbar">
       <label for="ai-model">对话连接 <select id="ai-model"><option value="">加载中</option></select></label>
       <div class="ai-actions">
+        <button id="ai-history" class="text-button" type="button">历史会话</button>
         <button id="ai-new" class="text-button" type="button">新建对话</button>
         <button id="ai-configure" class="outline-button" type="button">配置连接</button>
       </div>
@@ -17,6 +18,7 @@
           <button type="button" class="outline-button" data-ai-prompt="核对最近 24 小时的 RouterOS 登录成功和失败记录。">核对登录记录</button>
         </div>
       </div>
+      <button id="ai-older-messages" class="text-button hidden" type="button">加载更早消息</button>
       <div id="ai-messages" role="log" aria-label="对话记录" aria-live="polite"></div>
     </div>
     <form id="ai-chat-form" class="ai-composer">
@@ -30,6 +32,20 @@
     </form>
   </article>
 </section>
+
+<dialog id="ai-history-dialog" class="ai-dialog" aria-labelledby="ai-history-title">
+  <div class="ai-history-layout">
+    <header class="ai-dialog-header">
+      <h2 id="ai-history-title">历史会话</h2>
+      <button id="ai-history-close" class="text-button" type="button">关闭</button>
+    </header>
+    <div class="ai-dialog-body">
+      <ul id="ai-history-list"></ul>
+      <p id="ai-history-status" role="status"></p>
+      <button id="ai-history-more" class="outline-button hidden" type="button">加载更多会话</button>
+    </div>
+  </div>
+</dialog>
 
 <dialog id="ai-config-dialog" class="ai-dialog" aria-labelledby="ai-config-title">
   <form id="ai-config-form" autocomplete="off">

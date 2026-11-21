@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -234,8 +237,12 @@ func (a *App) aiChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.Question = strings.TrimSpace(body.Question)
-	if body.Question == "" || utf8.RuneCountInString(body.Question) > 2000 || len(body.Conversation) > 64 || body.Offset < -840 || body.Offset > 840 {
+	if body.Question == "" || utf8.RuneCountInString(body.Question) > 2000 || body.Offset < -840 || body.Offset > 840 {
 		apiError(w, 400, "请输入 1 至 2000 个字符的分析问题")
+		return
+	}
+	if body.Conversation != "" && !aiProfileID.MatchString(body.Conversation) {
+		apiError(w, 400, "会话标识无效")
 		return
 	}
 	settings, err := a.control.loadAI(r.Context())
@@ -255,30 +262,165 @@ func (a *App) aiChat(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 503, "AI 分析繁忙，请稍后再试")
 		return
 	}
-	id, conversation, history, err := a.ai.begin(session.CSRF, body.Conversation, profile)
-	if err != nil {
-		apiError(w, 409, err.Error())
-		return
+	var conversation aiConversation
+	if body.Conversation == "" {
+		id, err := randomToken(18)
+		if err != nil {
+			apiError(w, 503, "无法创建对话")
+			return
+		}
+		conversation.ID, conversation.Profile, conversation.profileHash = id, profile.ID, aiProfileHash(profile)
+	} else {
+		if !a.ai.lockConversation(body.Conversation) {
+			apiError(w, 409, "上一条问题正在分析")
+			return
+		}
+		defer a.ai.unlockConversation(body.Conversation)
+		ctx, cancel := boundedContext(r.Context())
+		defer cancel()
+		conversation, err = a.control.aiConversation(ctx, body.Conversation)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && !conversation.matches(profile)) {
+			apiError(w, 409, "会话已删除或原模型连接已更改，请新建对话")
+			return
+		}
+		if err != nil {
+			apiError(w, 503, "历史会话暂不可用")
+			return
+		}
 	}
+	history := conversation.messages()
+	reply := aiChatReply{Conversation: conversation.ID, Model: profile.Name}
 	var turn []aiMessage
-	defer func() { a.ai.end(conversation, turn) }()
 	if aiWantsBlockCommands(body.Question) {
-		answer, sources := aiBlockCommands(body.Question, history, a.config.Demo)
-		turn = []aiMessage{{Role: "user", Content: body.Question}, {Role: "assistant", Content: answer}}
-		jsonResponse(w, 200, map[string]any{
-			"conversation": id, "answer": answer, "block_sources": sources, "model": "ROS Watch",
-		})
-		return
+		reply.Answer, reply.BlockSources = aiBlockCommands(body.Question, history, a.config.Demo)
+		reply.Model = "ROS Watch"
+		turn = []aiMessage{{Role: "user", Content: body.Question}, {Role: "assistant", Content: reply.Answer}}
+	} else {
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(aiRequestBudget + 5*time.Second))
+		ctx, cancel := context.WithTimeout(r.Context(), aiRequestBudget)
+		defer cancel()
+		zone := time.FixedZone("", body.Offset*60)
+		turn, reply.Answer, reply.Evidence, err = a.aiRun(ctx, profile, settings.Reputation, history, body.Question, zone)
+		if err != nil {
+			apiError(w, 502, err.Error())
+			return
+		}
 	}
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(aiRequestBudget + 5*time.Second))
-	ctx, cancel := context.WithTimeout(r.Context(), aiRequestBudget)
+	// Keep a completed reply even if the browser leaves while the transaction is committing.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 4*time.Second)
 	defer cancel()
-	zone := time.FixedZone("", body.Offset*60)
-	result, answer, evidence, err := a.aiRun(ctx, profile, settings.Reputation, history, body.Question, zone)
-	if err != nil {
-		apiError(w, 502, err.Error())
+	if err := a.control.saveAITurn(ctx, conversation, body.Question, reply, turn); err != nil {
+		if errors.Is(err, errAIConversationChanged) {
+			apiError(w, 409, "会话已更改，请重新打开历史会话")
+			return
+		}
+		apiError(w, 503, "对话保存失败，请稍后重试")
 		return
 	}
-	turn = result
-	jsonResponse(w, 200, map[string]any{"conversation": id, "answer": answer, "evidence": evidence, "model": profile.Name})
+	jsonResponse(w, 200, reply)
+}
+
+func aiHistoryBefore(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	raw := r.URL.Query().Get("before")
+	if raw == "" {
+		return 0, true
+	}
+	before, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || before <= 0 {
+		apiError(w, 400, "历史会话分页标识无效")
+		return 0, false
+	}
+	return before, true
+}
+
+func (a *App) aiHistoryList(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := a.authorized(w, r); !ok {
+		return
+	}
+	before, ok := aiHistoryBefore(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := boundedContext(r.Context())
+	defer cancel()
+	page, err := a.control.aiConversations(ctx, before)
+	if err != nil {
+		apiError(w, 503, "历史会话暂不可用")
+		return
+	}
+	jsonResponse(w, 200, page)
+}
+
+func (a *App) aiHistoryDetail(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := a.authorized(w, r); !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !aiProfileID.MatchString(id) {
+		apiError(w, 400, "会话标识无效")
+		return
+	}
+	before, ok := aiHistoryBefore(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := boundedContext(r.Context())
+	defer cancel()
+	conversation, err := a.control.aiConversation(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		apiError(w, 404, "会话已删除")
+		return
+	}
+	if err != nil {
+		apiError(w, 503, "历史会话暂不可用")
+		return
+	}
+	page, err := a.control.aiSavedTurns(ctx, id, before)
+	if err != nil {
+		apiError(w, 503, "历史会话暂不可用")
+		return
+	}
+	if before == 0 && len(page.Items) == 0 {
+		apiError(w, 404, "会话已删除")
+		return
+	}
+	settings, err := a.control.loadAI(ctx)
+	if err != nil {
+		apiError(w, 503, "AI 设置暂不可用")
+		return
+	}
+	profile, exists := settings.profile(conversation.Profile)
+	jsonResponse(w, 200, struct {
+		Conversation aiConversationSummary `json:"conversation"`
+		CanResume    bool                  `json:"can_resume"`
+		aiHistoryPage[aiSavedTurn]
+	}{conversation.aiConversationSummary, exists && conversation.matches(profile), page})
+}
+
+func (a *App) aiHistoryDelete(w http.ResponseWriter, r *http.Request) {
+	_, session, ok := a.authorized(w, r)
+	if !ok {
+		return
+	}
+	if !validCSRF(r, session) {
+		apiError(w, 400, "页面验证已过期，请刷新后重试")
+		return
+	}
+	id := r.PathValue("id")
+	if !aiProfileID.MatchString(id) {
+		apiError(w, 400, "会话标识无效")
+		return
+	}
+	if !a.ai.lockConversation(id) {
+		apiError(w, 409, "会话正在分析，请稍后删除")
+		return
+	}
+	defer a.ai.unlockConversation(id)
+	ctx, cancel := boundedContext(r.Context())
+	defer cancel()
+	if _, err := a.control.db.ExecContext(ctx, "DELETE FROM ai_conversations WHERE id=?", id); err != nil {
+		apiError(w, 503, "会话删除失败，请稍后重试")
+		return
+	}
+	jsonResponse(w, 200, map[string]bool{"deleted": true})
 }
