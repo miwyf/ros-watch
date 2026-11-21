@@ -90,7 +90,8 @@ func openControl(dir string) (*Control, error) {
 	db.SetMaxOpenConns(1)
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS account(id INTEGER PRIMARY KEY CHECK(id=1),username TEXT NOT NULL,password_hash TEXT NOT NULL,revision TEXT NOT NULL,updated_at REAL NOT NULL);
  CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1),value TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS map_settings(id INTEGER PRIMARY KEY CHECK(id=1),value TEXT NOT NULL);`)
+ CREATE TABLE IF NOT EXISTS map_settings(id INTEGER PRIMARY KEY CHECK(id=1),value TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS ai_settings(id INTEGER PRIMARY KEY CHECK(id=1),value TEXT NOT NULL);`)
 	if err == nil {
 		value, _ := json.Marshal(defaultSettings())
 		_, err = db.Exec("INSERT INTO settings VALUES(1,?) ON CONFLICT(id) DO NOTHING", string(value))

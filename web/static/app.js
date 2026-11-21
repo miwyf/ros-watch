@@ -21,7 +21,7 @@ let view = "overview",
   next = null,
   cursor = null;
 const filterNames = ["hours", "wan", "scope", "proto", "outcome", "direction"];
-const viewNames = ["overview", "map", "events", "logs", "system", "settings"];
+const viewNames = ["overview", "map", "events", "logs", "ai", "system", "settings"];
 const settingsTabNames = ["connection", "logs", "account", "notifications", "mqtt"];
 let settingsTab = "connection";
 let receiverState = null, accessCoverage = null, systemCoverage = null, summaryUpdatedAt = null;
@@ -33,6 +33,7 @@ function restoreLocation() {
     const fallback = key === "hours" ? "12" : key === "direction" ? "inbound" : "";
     const value = query.get(key) ?? fallback;
     if (key === "wan" && value && value.length <= 256 && ![...$(key).options].some(option=>option.value===value)) $(key).add(new Option(value,value));
+    if (key === "hours") addSavedHours($(key), value);
     $(key).value = [...$(key).options].some(option=>option.value===value) ? value : fallback;
   }
   for (const key of ["src","dport"]) $(key).value = query.get(key) || "";
@@ -41,8 +42,16 @@ function restoreLocation() {
   cursor = /^[1-9][0-9]*$/.test(query.get("before") || "") ? query.get("before") : null;
   for (const key of ["hours","category","severity","event","device","username","source","q"]) {
     const value=query.get("logs_"+key);
+    if (key === "hours") addSavedHours($("logs-hours"), value);
     $("logs-"+key).value=value ?? (key==="hours" ? "12" : "");
   }
+}
+function addSavedHours(select, value) {
+  for (const option of select.querySelectorAll("[data-linked-hours]")) option.remove();
+  if (!/^[1-9][0-9]{0,2}$/.test(value || "") || Number(value) > 168 || [...select.options].some(option => option.value === value)) return;
+  const option = new Option("最近 " + value + " 小时", value);
+  option.dataset.linkedHours = "true";
+  select.add(option);
 }
 function writeLocation(push = false) {
   const fragment = view === "overview" ? "" : view === "settings" && settingsTab !== "connection" ? "#settings/"+settingsTab : "#"+view;
@@ -97,7 +106,7 @@ function renderReceiverStatus() {
     notice.append(node("span", problems.join(" ")));
     const link = node("a", action, "notice-link"); link.href = target; notice.append(link);
   }
-  notice.classList.toggle("hidden", view === "settings" || !problems.length);
+  notice.classList.toggle("hidden", ["settings","ai"].includes(view) || !problems.length);
   notice.classList.toggle("danger", danger);
   $("connection").title = s.demo ? "演示模式 · 均为合成数据，与实际网络无关" : s.last_received ? "最后收到有效日志：" + date(s.last_received) : "尚未收到有效日志";
   $("connection").classList.toggle("stale", !!s.error || s.storage.space_state !== "normal");
@@ -144,6 +153,7 @@ function showView(name, push = false, keepCursor = false) {
   }
   view = name;
   document.body.classList.toggle("map-page", name === "map");
+  document.body.classList.toggle("ai-page", name === "ai");
   writeLocation(push);
   document.querySelectorAll(".mobile-nav-more").forEach(menu=>menu.open=false);
   const titles = {
@@ -151,6 +161,7 @@ function showView(name, push = false, keepCursor = false) {
     map: "来源地图",
     events: "访问记录",
     logs: "系统日志",
+    ai: "AI 分析",
     system: "接收状态",
     settings: "系统设置",
   };
@@ -165,11 +176,12 @@ function showView(name, push = false, keepCursor = false) {
 
   document
     .querySelector(".filterbar")
-    .classList.toggle("hidden", name === "settings" || name === "logs");
-  $("refresh").classList.toggle("hidden", name === "settings");
-  $("auto-refresh").classList.toggle("hidden", name === "settings");
+    .classList.toggle("hidden", ["settings","logs","ai"].includes(name));
+  $("refresh").classList.toggle("hidden", ["settings","ai"].includes(name));
+  $("auto-refresh").classList.toggle("hidden", ["settings","ai"].includes(name));
   renderReceiverStatus();
   window.ROSMap?.setVisible(name === "map");
+  if (name === "ai") window.ROSAI?.enter();
   document.title = name === "settings" ? "系统设置 · ROS Watch" : "ROS Watch · 网络观察台";
   if (name === "settings") {
     for (const tab of settingsTabNames) {

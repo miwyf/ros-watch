@@ -61,13 +61,15 @@ func scanEligible(e Event) bool {
 
 // All scan summaries use per-device fixed windows and exclude exact business matches.
 func (s *Store) scanQuery(f Filters) (string, []any) {
+	windows, params := scanWindowsQuery(f, s.settings.Load())
+	return `SELECT sender,src,MAX(ports) ports,SUM(n) n,MIN(first) first,MAX(last) last,COUNT(*) OVER() total FROM (` + windows + `) GROUP BY sender,src`, params
+}
+
+func scanWindowsQuery(f Filters, settings *Settings) (string, []any) {
 	where, args := f.where()
-	settings := s.settings.Load()
 	params := append([]any{settings.ScanWindow}, args...)
 	params = append(params, settings.ScanPorts)
-	return `SELECT sender,src,MAX(ports) ports,SUM(n) n,MIN(first) first,MAX(last) last,COUNT(*) OVER() total FROM (
- SELECT sender,src,CAST(ts / ? AS INTEGER) window,COUNT(DISTINCT dport) ports,COUNT(*) n,MIN(ts) first,MAX(ts) last FROM events WHERE ` + where + ` AND direction='inbound' AND dport IS NOT NULL AND NOT ` + businessExistsSQL + ` GROUP BY sender,src,window HAVING ports >= ?
- ) GROUP BY sender,src`, params
+	return `SELECT sender,src,CAST(ts / ? AS INTEGER) window,COUNT(DISTINCT dport) ports,COUNT(*) n,MIN(ts) first,MAX(ts) last FROM events WHERE ` + where + ` AND direction='inbound' AND dport IS NOT NULL AND NOT ` + businessExistsSQL + ` GROUP BY sender,src,window HAVING ports >= ?`, params
 }
 
 // Upgrade existing records once, without discarding raw history. Batches bound

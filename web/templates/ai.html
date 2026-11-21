@@ -1,0 +1,123 @@
+<section id="ai-view" class="view hidden">
+  <article class="panel ai-panel">
+    <div class="ai-toolbar">
+      <label for="ai-model">对话连接 <select id="ai-model"><option value="">加载中</option></select></label>
+      <div class="ai-actions">
+        <button id="ai-new" class="text-button" type="button">新建对话</button>
+        <button id="ai-configure" class="outline-button" type="button">配置连接</button>
+      </div>
+    </div>
+    <div class="ai-thread" id="ai-thread">
+      <div id="ai-welcome" class="ai-welcome">
+        <h2>分析 RouterOS 日志</h2>
+        <p id="ai-welcome-copy">按时间、来源和端口分析访问记录，或追问上一轮结果。</p>
+        <div class="ai-prompts">
+          <button type="button" class="outline-button" data-ai-prompt="分析最近 7 天的保加利亚扫描，列出主要来源和网段。">最近 7 天的保加利亚扫描</button>
+          <button type="button" class="outline-button" data-ai-prompt="最近 24 小时有哪些反复出现的扫描来源？">反复扫描的来源</button>
+          <button type="button" class="outline-button" data-ai-prompt="核对最近 24 小时的 RouterOS 登录成功和失败记录。">核对登录记录</button>
+        </div>
+      </div>
+      <div id="ai-messages" role="log" aria-label="对话记录" aria-live="polite"></div>
+    </div>
+    <form id="ai-chat-form" class="ai-composer">
+      <label for="ai-question" class="ai-visually-hidden">输入分析问题</label>
+      <textarea id="ai-question" rows="2" maxlength="2000" placeholder="输入分析问题，Enter 发送，Shift + Enter 换行"></textarea>
+      <div class="ai-compose-actions">
+        <span id="ai-status" role="status"></span>
+        <button id="ai-stop" class="outline-button hidden" type="button">停止</button>
+        <button id="ai-send" class="primary" type="submit" disabled>发送</button>
+      </div>
+    </form>
+  </article>
+</section>
+
+<dialog id="ai-config-dialog" class="ai-dialog" aria-labelledby="ai-config-title">
+  <form id="ai-config-form" autocomplete="off">
+    <header class="ai-dialog-header">
+      <h2 id="ai-config-title">AI 连接</h2>
+      <button id="ai-config-close" class="text-button" type="button" aria-label="关闭配置">关闭</button>
+    </header>
+    <div class="ai-dialog-body">
+      <section>
+        <h3>模型连接</h3>
+        <div class="ai-profile-row">
+          <label>编辑连接<select id="ai-edit-profile"></select></label>
+          <button id="ai-add-profile" class="outline-button" type="button" aria-expanded="false" aria-controls="ai-provider-picker">添加连接</button>
+        </div>
+        <div id="ai-provider-picker" class="ai-provider-picker hidden" role="group" aria-label="模型服务预设"></div>
+        <div id="ai-profile-fields" class="ai-grid hidden">
+          <label>连接名称<input id="ai-profile-name" maxlength="100" placeholder="例如 局域网 Ollama"></label>
+          <label>模型 ID<input id="ai-profile-model" maxlength="256" placeholder="选择或输入模型 ID"></label>
+          <label class="ai-wide">Base URL<input id="ai-profile-url" inputmode="url" maxlength="1024" placeholder="https://gateway.example.com/v1"></label>
+          <label class="ai-wide">API Key<input id="ai-profile-key" type="password" maxlength="2048" autocomplete="new-password" placeholder="无密钥的本地服务可留空"></label>
+          <div class="ai-wide ai-model-picker">
+            <button id="ai-refresh-models" class="outline-button" type="button">刷新模型列表</button>
+            <select id="ai-model-results" class="hidden" aria-label="从服务返回的模型中选择"></select>
+            <span id="ai-model-status" role="status"></span>
+            <div id="ai-model-choices" role="group" aria-label="可选模型"></div>
+          </div>
+          <label class="ai-check"><input type="checkbox" id="ai-profile-default">在新对话中默认使用</label>
+          <label class="ai-check"><input type="checkbox" id="ai-profile-clear">清除已保存的 Key</label>
+          <div class="ai-wide ai-actions">
+            <button id="ai-test-profile" class="outline-button" type="button">测试已保存连接</button>
+            <button id="ai-remove-profile" class="text-button" type="button">移除连接</button>
+          </div>
+        </div>
+        <p class="ai-help">使用 OpenAI Chat Completions 兼容接口。测试会用模拟数据验证工具调用和结果回传。</p>
+      </section>
+      <section>
+        <h3>IP 情报</h3>
+        <div class="ai-grid">
+          <label class="ai-check"><input id="ai-grey-on" type="checkbox">GreyNoise</label>
+          <label class="ai-check"><input id="ai-abuse-on" type="checkbox">AbuseIPDB</label>
+          <div class="ai-key-field">
+            <label for="ai-grey-key">GreyNoise API Key</label>
+            <a href="https://viz.greynoise.io/account/api-key" target="_blank" rel="noopener noreferrer" aria-label="获取 GreyNoise API Key">获取 Key ↗</a>
+            <input id="ai-grey-key" type="password" maxlength="2048" autocomplete="new-password" placeholder="可选">
+          </div>
+          <div class="ai-key-field">
+            <label for="ai-abuse-key">AbuseIPDB API Key</label>
+            <a href="https://www.abuseipdb.com/account" target="_blank" rel="noopener noreferrer" aria-label="获取 AbuseIPDB API Key" title="登录后打开 API 标签页">获取 Key ↗</a>
+            <input id="ai-abuse-key" type="password" maxlength="2048" autocomplete="new-password" placeholder="启用时必填">
+          </div>
+          <label class="ai-check"><input id="ai-grey-clear" type="checkbox">清除 GreyNoise Key</label>
+          <label class="ai-check"><input id="ai-abuse-clear" type="checkbox">清除 AbuseIPDB Key</label>
+          <label class="ai-check ai-wide"><input id="ai-drop-on" type="checkbox">Spamhaus DROP / ASN-DROP</label>
+        </div>
+        <details class="ai-custom-intel">
+          <summary>自定义 IP 情报</summary>
+          <div class="ai-grid">
+            <label class="ai-check ai-wide"><input id="ai-custom-on" type="checkbox">在 AI 分析中启用</label>
+            <label class="ai-wide">查询地址<input id="ai-custom-url" inputmode="url" maxlength="1024" placeholder="https://example.com/lookup?ip={ip}"></label>
+            <label>认证方式
+              <select id="ai-custom-auth">
+                <option value="none">无认证</option>
+                <option value="bearer">Bearer Token</option>
+                <option value="x-api-key">X-API-Key 请求头</option>
+                <option value="key">Key 请求头</option>
+              </select>
+            </label>
+            <label id="ai-custom-key-label">API Key<input id="ai-custom-key" type="password" maxlength="2048" autocomplete="new-password"></label>
+            <label class="ai-check ai-wide"><input id="ai-custom-clear" type="checkbox">清除已保存的 Key</label>
+            <p class="ai-help ai-wide">查询地址使用 {ip} 代表待查 IP。至少填写一个 JSON 字段路径，留空的字段会跳过。</p>
+            <label>分类<input id="ai-custom-classification" maxlength="120" placeholder="data.classification"></label>
+            <label>名单命中（true／false）<input id="ai-custom-listed" maxlength="120" placeholder="data.listed"></label>
+            <label>评分（0–100）<input id="ai-custom-confidence" maxlength="120" placeholder="data.score"></label>
+            <label>举报数<input id="ai-custom-reported-count" maxlength="120" placeholder="data.reports"></label>
+            <label class="ai-wide">最后出现时间（ISO 格式）<input id="ai-custom-last-seen" maxlength="120" placeholder="data.last_seen"></label>
+            <div class="ai-wide ai-profile-row">
+              <label>测试用公网 IP<input id="ai-custom-test-ip" maxlength="64" spellcheck="false"></label>
+              <button id="ai-custom-test" class="outline-button" type="button" disabled>测试已保存接口</button>
+            </div>
+            <div id="ai-custom-result" class="ai-wide ai-help" role="status"></div>
+          </div>
+        </details>
+        <p class="ai-help">启用后，情报服务只会收到待查公网 IP。模型收到对话内容及本地统计摘要。API Key 存在服务端。</p>
+      </section>
+    </div>
+    <footer class="ai-dialog-footer">
+      <span id="ai-config-result" role="status"></span>
+      <button id="ai-save-config" class="primary" type="submit">保存设置</button>
+    </footer>
+  </form>
+</dialog>

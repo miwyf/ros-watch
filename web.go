@@ -55,6 +55,7 @@ type App struct {
 	notifier       *Notifier
 	mqtt           *MQTTPublisher
 	geo            *GeoLookup
+	ai             *aiService
 	templates      *template.Template
 	cookies        *securecookie.SecureCookie
 	authMu         sync.Mutex
@@ -81,7 +82,7 @@ func newApp(config Config) (*App, error) {
 		control.db.Close()
 		return nil, err
 	}
-	a := &App{config: config, control: control, attempts: map[string]authAttempt{}, cache: map[string]*cachedSummary{}, requests: make(chan struct{}, 32), expensive: make(chan struct{}, 2)}
+	a := &App{config: config, control: control, ai: newAIService(), attempts: map[string]authAttempt{}, cache: map[string]*cachedSummary{}, requests: make(chan struct{}, 32), expensive: make(chan struct{}, 2)}
 	a.settings.Store(&settings)
 	a.store, err = openStore(config.DataDir, &a.settings)
 	if err != nil {
@@ -196,6 +197,12 @@ func (a *App) handler() http.Handler {
 	mux.HandleFunc("GET /api/logs", a.logs)
 	mux.HandleFunc("GET /api/logs/summary", a.logStatistics)
 	mux.HandleFunc("GET /api/logs/export", a.exportLogs)
+	mux.HandleFunc("GET /api/ai/settings", a.aiConfiguration)
+	mux.HandleFunc("POST /api/ai/settings", a.aiConfiguration)
+	mux.HandleFunc("POST /api/ai/models", a.aiModelList)
+	mux.HandleFunc("POST /api/ai/test", a.aiConnectionTest)
+	mux.HandleFunc("POST /api/ai/reputation/custom/test", a.aiCustomIntelTest)
+	mux.HandleFunc("POST /api/ai/chat", a.aiChat)
 	static, _ := fs.Sub(assets, "web/static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +223,11 @@ func (a *App) handler() http.Handler {
 				apiError(w, 500, "请求暂时无法处理")
 			}
 		}()
-		r.Body = http.MaxBytesReader(w, r.Body, 16384)
+		limit := int64(16384)
+		if r.Method == http.MethodPost && r.URL.Path == "/api/ai/settings" {
+			limit = 49152
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		mux.ServeHTTP(w, r)
 	})
 }
