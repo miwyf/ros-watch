@@ -3,9 +3,6 @@ set -eu
 
 printf '%s\n' "$APP_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
 case "$GITHUB_REF" in
-  refs/heads/dev)
-    expected="$IMAGE:dev"
-    ;;
   refs/heads/main)
     expected=$(printf '%s\n' "$IMAGE:latest" "$IMAGE:$APP_VERSION" | sort)
     ;;

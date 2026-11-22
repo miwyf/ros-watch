@@ -1,9 +1,22 @@
 import unittest
 
-from cleanup_images import deletion_plan, manifest_graph, tagged_roots
+from cleanup_images import deletion_plan, dev_retirement_target, manifest_graph, tagged_roots
 
 
 class ImageCleanupTests(unittest.TestCase):
+    def test_retirement_targets_only_the_expected_dev_version(self):
+        dev, stable = ["sha256:" + digit * 64 for digit in "12"]
+        candidate = {"id": 1, "name": dev, "metadata": {"container": {"tags": ["dev"]}}}
+        self.assertEqual(dev_retirement_target([candidate], dev, {stable}), candidate)
+        self.assertIsNone(dev_retirement_target([], dev, {stable}))
+        with self.assertRaises(RuntimeError):
+            dev_retirement_target([candidate], stable, {stable})
+        with self.assertRaises(RuntimeError):
+            dev_retirement_target([candidate], dev, {dev})
+        candidate["metadata"]["container"]["tags"].append("0.7.21")
+        with self.assertRaises(RuntimeError):
+            dev_retirement_target([candidate], dev, {stable})
+
     def test_dev_image_and_its_architectures_survive_stable_cleanup(self):
         stable, dev, amd64, arm64, old = ["sha256:" + digit * 64 for digit in "12345"]
         graph = {stable: {}, dev: {"manifests": [{"digest": amd64}, {"digest": arm64}]}, amd64: {}, arm64: {}}

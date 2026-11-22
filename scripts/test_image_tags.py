@@ -16,9 +16,8 @@ class ImageTagTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode == 0, expected, result.stderr)
 
-    def test_dev_only_publishes_dev(self):
-        self.check_tags("refs/heads/dev", ["dev"], True)
-        for tags in [["dev", "latest"], ["dev", "0.7.13"], ["dev", "sha-commit"], ["latest"], []]:
+    def test_retired_dev_cannot_publish(self):
+        for tags in [["dev"], ["dev", "latest"], ["latest", "0.7.13"], []]:
             with self.subTest(tags=tags):
                 self.check_tags("refs/heads/dev", tags, False)
 

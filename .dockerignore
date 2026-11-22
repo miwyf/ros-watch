@@ -4,6 +4,8 @@
 !*.go
 !cmd
 !cmd/**
+!internal
+!internal/**
 !web
 !web/**
 !geo

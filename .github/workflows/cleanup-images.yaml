@@ -12,6 +12,10 @@ on:
         required: true
         default: false
         type: boolean
+      retire_dev_digest:
+        description: Delete only the legacy dev version at this verified digest
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -32,9 +36,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEEP_DIGEST: ${{ inputs.keep_digest }}
           APPLY: ${{ inputs.apply }}
+          RETIRE_DEV_DIGEST: ${{ inputs.retire_dev_digest }}
         run: |
-          if [ "$APPLY" = true ]; then
-            python3 scripts/cleanup_images.py --expected-digest "$KEEP_DIGEST" --apply
-          else
-            python3 scripts/cleanup_images.py --expected-digest "$KEEP_DIGEST"
+          set -- --expected-digest "$KEEP_DIGEST"
+          if [ -n "$RETIRE_DEV_DIGEST" ]; then
+            set -- "$@" --retire-dev-digest "$RETIRE_DEV_DIGEST"
           fi
+          if [ "$APPLY" = true ]; then
+            set -- "$@" --apply
+          fi
+          python3 scripts/cleanup_images.py "$@"

@@ -71,17 +71,27 @@ def main():
         raise AssertionError(docker("logs", container).stdout + docker("logs", container).stderr)
 
     def identity(container, uid, gid):
-        status = docker(
-            "run", "--rm", "--pid", "container:" + container,
-            "alpine:3.21", "cat", "/proc/1/status"
-        ).stdout
-        fields = dict(line.split(":", 1) for line in status.splitlines() if ":" in line)
-        assert fields["Name"].strip() == "ros-watch", fields
-        assert [int(v) for v in fields["Uid"].split()] == [uid] * 4, fields
-        assert [int(v) for v in fields["Gid"].split()] == [gid] * 4, fields
-        assert int(fields["CapEff"], 16) == 0, fields
-        assert int(fields["CapPrm"], 16) == 0, fields
-        assert fields["NoNewPrivs"].strip() == "1", fields
+        def proc(*command):
+            return docker(
+                "run", "--rm", "--pid", "container:" + container,
+                "alpine:3.21", *command
+            ).stdout
+
+        def status(pid):
+            fields = dict(line.split(":", 1) for line in proc("cat", f"/proc/{pid}/status").splitlines() if ":" in line)
+            assert [int(v) for v in fields["Uid"].split()] == [uid] * 4, fields
+            assert [int(v) for v in fields["Gid"].split()] == [gid] * 4, fields
+            assert int(fields["CapEff"], 16) == 0, fields
+            assert int(fields["CapPrm"], 16) == 0, fields
+            assert fields["NoNewPrivs"].strip() == "1", fields
+            return fields["Name"].strip()
+
+        name = status(1)
+        if name == "entrypoint":
+            children = proc("sh", "-c", "cat /proc/1/task/*/children").split()
+            assert len(children) == 1, children
+            name = status(children[0])
+        assert name == "ros-watch", name
 
     def passed(name, **details):
         results.append({"case": name, "passed": True, **details})

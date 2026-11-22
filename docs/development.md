@@ -2,6 +2,8 @@
 
 本文用于修改源码后的验证，部署步骤见 [README](../README.md)。GitHub Actions 自动运行测试、竞争检测、静态检查和镜像启动检查。
 
+Git 标签发布的程序文件名包含 `update-info` 输出的兼容版本。变更容器运行环境、内置 GeoIP 数据或作不兼容的 SQLite 变更时，同步提高 `internal/appupdate/compat.go` 中对应的兼容版本。旧版后台会提示使用新版镜像。
+
 ## 本机验证
 
 需要 Go 1.27.3+ 和支持竞争检测的 C 编译工具链。在项目根目录执行：

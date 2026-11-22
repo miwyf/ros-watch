@@ -18,16 +18,24 @@ import (
 
 	"golang.org/x/net/netutil"
 	"golang.org/x/term"
+	"ros-watch/internal/appupdate"
 )
 
 func main() {
 	if err := run(); err != nil {
+		if errors.Is(err, appupdate.ErrRestart) {
+			os.Exit(appupdate.RestartCode)
+		}
 		log.Print("ROS Watch stopped: ", err)
 		os.Exit(1)
 	}
 }
 
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "update-info" {
+		fmt.Println(Version, appupdate.Compatibility)
+		return nil
+	}
 	config, err := loadConfig()
 	if err != nil {
 		return err
@@ -67,6 +75,10 @@ func run() error {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	restart := make(chan struct{}, 1)
+	if updateDir := os.Getenv(appupdate.DirEnv); updateDir != "" && os.Geteuid() > 0 {
+		app.update = newSystemUpdate(ctx, updateDir, restart)
+	}
 	if err = app.collector.start(ctx, config.SyslogHost, config.SyslogPort); err != nil {
 		return errors.New("syslog listener unavailable")
 	}
@@ -83,8 +95,11 @@ func run() error {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(signals)
+	var result error
 	select {
 	case <-signals:
+	case <-restart:
+		result = appupdate.ErrRestart
 	case err = <-stopped:
 		if !errors.Is(err, http.ErrServerClosed) {
 			log.Print("HTTP server stopped")
@@ -94,8 +109,10 @@ func run() error {
 	app.collector.stop()
 	shutdown, done := context.WithTimeout(context.Background(), 5*time.Second)
 	defer done()
-	_ = server.Shutdown(shutdown)
-	return nil
+	if err := server.Shutdown(shutdown); err != nil {
+		_ = server.Close()
+	}
+	return result
 }
 
 func resetCLI(config Config, args []string) error {

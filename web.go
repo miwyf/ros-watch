@@ -70,6 +70,7 @@ type App struct {
 	snapshotWG     sync.WaitGroup
 	requests       chan struct{}
 	expensive      chan struct{}
+	update         *systemUpdate
 }
 
 func newApp(config Config) (*App, error) {
@@ -177,6 +178,9 @@ func (a *App) handler() http.Handler {
 	mux.HandleFunc("POST /api/account", a.account)
 	mux.HandleFunc("GET /api/settings", a.runtimeSettings)
 	mux.HandleFunc("POST /api/settings", a.runtimeSettings)
+	mux.HandleFunc("GET /api/update", a.updateCheck)
+	mux.HandleFunc("GET /api/update/status", a.updateStatus)
+	mux.HandleFunc("POST /api/update", a.updateStart)
 	mux.HandleFunc("GET /api/notifications", a.notificationSettings)
 	mux.HandleFunc("POST /api/notifications", a.notificationSettings)
 	mux.HandleFunc("POST /api/notifications/test", a.testNotification)

@@ -22,7 +22,7 @@ let view = "overview",
   cursor = null;
 const filterNames = ["hours", "wan", "scope", "proto", "outcome", "direction"];
 const viewNames = ["overview", "map", "events", "logs", "ai", "system", "settings"];
-const settingsTabNames = ["connection", "logs", "account", "notifications", "mqtt"];
+const settingsTabNames = ["connection", "logs", "account", "notifications", "mqtt", "update"];
 let settingsTab = "connection";
 let receiverState = null, accessCoverage = null, systemCoverage = null, summaryUpdatedAt = null;
 let autoRefresh = true, overviewScroll = 0, eventRequest = null;
@@ -192,6 +192,7 @@ function showView(name, push = false, keepCursor = false) {
       $("settings-panel-" + tab).classList.toggle("hidden", !selected);
     }
     window.loadSettings?.();
+    if (settingsTab === "update") window.loadSystemUpdate?.();
   }
   if (name === "logs") logCursor = null;
   refresh(true);

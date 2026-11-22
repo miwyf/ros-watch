@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"syscall"
 
 	"golang.org/x/sys/unix"
+	"ros-watch/internal/appupdate"
 )
 
 func configuredID(name string) (int, error) {
@@ -50,6 +52,33 @@ func prepareData(dir string, uid, gid int) error {
 			names = append(names, database+suffix)
 		}
 	}
+	if err := prepareFiles(fd, names, uid, gid, 0600); err != nil {
+		return err
+	}
+	if uid != 0 {
+		if err := prepareUpdateData(fd, uid, gid); err != nil {
+			log.Printf("ROS Watch upgrade directory unavailable: %v", err)
+		}
+	}
+	return nil
+}
+
+func prepareUpdateData(fd, uid, gid int) error {
+	updateFD, err := unix.Openat(fd, appupdate.DirName, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if errors.Is(err, unix.ENOENT) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer unix.Close(updateFD)
+	if err := ownFile(updateFD, uid, gid, 0700); err != nil {
+		return err
+	}
+	return prepareFiles(updateFD, []string{"current", "pending"}, uid, gid, 0700)
+}
+
+func prepareFiles(fd int, names []string, uid, gid int, mode uint32) error {
 	for _, name := range names {
 		file, err := unix.Openat(fd, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 		if errors.Is(err, unix.ENOENT) {
@@ -62,7 +91,7 @@ func prepareData(dir string, uid, gid int) error {
 				err = errors.New("expected a regular application data file")
 			}
 			if err == nil {
-				err = ownFile(file, uid, gid, 0600)
+				err = ownFile(file, uid, gid, mode)
 			}
 			unix.Close(file)
 		}
@@ -129,12 +158,16 @@ func run() error {
 		}
 	}
 	log.Printf("ROS Watch runtime UID:GID %d:%d", os.Geteuid(), os.Getegid())
-	return syscall.Exec("/ros-watch", append([]string{"/ros-watch"}, os.Args[1:]...), os.Environ())
+	return startApplication(dir, os.Args[1:])
 }
 
 func main() {
 	if err := run(); err != nil {
-		log.Print("ROS Watch container initialization failed: ", err)
+		log.Print("ROS Watch container stopped: ", err)
+		var status *exec.ExitError
+		if errors.As(err, &status) && status.ExitCode() > 0 {
+			os.Exit(status.ExitCode())
+		}
 		os.Exit(1)
 	}
 }

@@ -5,6 +5,7 @@
     <button id="settings-tab-account" type="button" role="tab" data-settings-tab="account" aria-controls="settings-panel-account" aria-selected="false" tabindex="-1">账号安全</button>
     <button id="settings-tab-notifications" type="button" role="tab" data-settings-tab="notifications" aria-controls="settings-panel-notifications" aria-selected="false" tabindex="-1">告警通知</button>
     <button id="settings-tab-mqtt" type="button" role="tab" data-settings-tab="mqtt" aria-controls="settings-panel-mqtt" aria-selected="false" tabindex="-1">Home Assistant</button>
+    <button id="settings-tab-update" type="button" role="tab" data-settings-tab="update" aria-controls="settings-panel-update" aria-selected="false" tabindex="-1">系统更新</button>
   </div>
   <section id="settings-panel-connection" role="tabpanel" aria-labelledby="settings-tab-connection" class="settings-panel">
     <form id="connection-form" class="panel settings-form">
@@ -182,5 +183,19 @@
       <div class="settings-actions"><button class="primary" type="submit">保存接入设置</button><button id="mqtt-publish" type="button">立即发布</button><a class="outline-button" href="/api/mqtt/dashboard">下载 HA 看板</a><a class="text-button" href="/api/mqtt/dashboard?style=basic">下载简版</a><span id="mqtt-result" role="status"></span></div>
     </form>
     <article class="panel settings-help"><h2>在 HA 中查看</h2><p>保存并启用后，进入 HA 的“设置 → 设备与服务 → MQTT”，查看新发现的 ROS Watch 设备。Broker 确认发布成功后，仍需在 HA 中确认实体可用。</p><p>默认大屏版需要 button-card、ApexCharts 和 vertical-stack-in-card；未安装时可下载简版。下载看板后，在 HA 新建独立看板，将 YAML 粘贴到原始配置编辑器。若曾修改实体 ID，请同步调整 YAML 中的引用。曲线从 HA 接入后开始积累，不会自动补回此前 12 小时历史。</p></article>
+  </section>
+  <section id="settings-panel-update" role="tabpanel" aria-labelledby="settings-tab-update" class="settings-panel hidden">
+    <article class="panel settings-form">
+      <div class="panel-heading"><h2>系统更新</h2></div>
+      <div class="settings-fields">
+        <div><span class="muted">当前运行版本</span><p id="update-current">v{{.Version}}</p></div>
+        <div><span class="muted">最新正式版</span><p id="update-latest">—</p></div>
+      </div>
+      <div class="settings-actions">
+        <button id="update-check" type="button" disabled>检查更新</button>
+        <button id="update-apply" class="primary hidden" type="button">立即升级</button>
+        <span id="update-result" role="status"></span>
+      </div>
+    </article>
   </section>
 </section>

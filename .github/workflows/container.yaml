@@ -2,7 +2,7 @@ name: Test and publish container
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
     tags: ['v*']
     paths-ignore: ['**/*.md']
   pull_request:
@@ -71,7 +71,7 @@ jobs:
 
   publish:
     needs: test
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/tags/v'))
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -107,7 +107,6 @@ jobs:
           labels: org.opencontainers.image.version=${{ env.APP_VERSION }}
           flavor: latest=false
           tags: |
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=${{ env.APP_VERSION }},enable=${{ github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
@@ -143,3 +142,41 @@ jobs:
           docker exec ros-watch-smoke /ros-watch healthcheck
           test "$(docker exec ros-watch-smoke /ros-watch version)" = "ROS Watch $APP_VERSION (Go)"
           curl --fail --silent http://127.0.0.1:18086/setup | grep -q '创建管理员'
+
+  release:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+      - name: Build application update binaries
+        run: |
+          read -r version compatibility < <(go run . update-info)
+          test "v$version" = "$GITHUB_REF_NAME"
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -buildvcs=false -ldflags="-s -w" \
+              -o "dist/ros-watch-linux-$arch-$compatibility" .
+          done
+      - name: Publish GitHub Release with both binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            if [[ "$draft" == "true" ]]; then
+              gh release upload "$GITHUB_REF_NAME" dist/ros-watch-linux-* --clobber
+              gh release edit "$GITHUB_REF_NAME" --draft=false
+            else
+              gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' > "$RUNNER_TEMP/release-assets"
+              for asset in dist/ros-watch-linux-*; do
+                grep -Fxq "${asset##*/}" "$RUNNER_TEMP/release-assets"
+              done
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/ros-watch-linux-*
+          fi

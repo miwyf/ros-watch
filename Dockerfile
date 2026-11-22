@@ -7,6 +7,7 @@ RUN go mod download
 COPY *.go ./
 COPY web ./web
 COPY cmd ./cmd
+COPY internal ./internal
 COPY geo ./geo
 COPY routeros ./routeros
 COPY docs/home-assistant-observatory.yaml ./docs/

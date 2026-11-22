@@ -194,3 +194,79 @@ setInterval(async () => {
   if (document.hidden || $("settings-view").classList.contains("hidden")) return;
   try { renderNotificationStatus((await api("/api/notifications")).status); } catch (_) {}
 }, 30000);
+
+let updateTarget = "", updateRunning = false, updateLoaded = false;
+window.loadSystemUpdate = async function () {
+  if (updateRunning || updateLoaded) return;
+  try {
+    const status = await api("/api/update/status");
+    $("update-current").textContent = "v" + status.current;
+    $("update-check").disabled = !status.enabled;
+    updateLoaded = true;
+    const done = sessionStorage.getItem("ros-watch-upgraded");
+    if (done) {
+      sessionStorage.removeItem("ros-watch-upgraded");
+      settingsMessage("update-result", "已升级到 v" + done);
+    } else if (!status.enabled) {
+      settingsMessage("update-result", "应用内升级需要使用支持该功能的 Docker 镜像和可执行的数据卷。");
+    }
+  } catch (error) {
+    settingsMessage("update-result", error.message, true);
+  }
+};
+$("update-check").addEventListener("click", async () => {
+  const button = $("update-check");
+  button.disabled = true;
+  updateTarget = "";
+  $("update-apply").classList.add("hidden");
+  settingsMessage("update-result", "正在检查 GitHub 发布版本…");
+  try {
+    const info = await api("/api/update");
+    $("update-current").textContent = "v" + info.current;
+    $("update-latest").textContent = info.latest ? "v" + info.latest : "—";
+    settingsMessage("update-result", info.needs_image ? "此版本需要更新 Docker 镜像。" :
+      info.available ? "服务会短暂中断，期间可能漏收 UDP 日志。" : "暂无可用的新版本。");
+    updateTarget = info.available ? info.latest : "";
+    $("update-apply").classList.toggle("hidden", !updateTarget);
+  } catch (error) {
+    settingsMessage("update-result", error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+$("update-apply").addEventListener("click", async () => {
+  const target = updateTarget;
+  if (!target || updateRunning || !window.confirm("升级到 v" + target + "？服务会短暂重启。")) return;
+  updateRunning = true;
+  $("update-check").disabled = $("update-apply").disabled = true;
+  try {
+    await postSettings("/api/update", {version: target});
+    settingsMessage("update-result", "正在下载并校验升级程序…");
+    const deadline = Date.now() + 240000;
+    let restartingAt = 0, ready = 0;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      const options = {cache:"no-store", signal:AbortSignal.timeout(4000)};
+      const health = await fetch("/healthz", options).then(res => res.json()).catch(() => null);
+      ready = health?.status === "ok" && health?.version === target ? ready + 1 : 0;
+      if (ready >= 4) {
+        sessionStorage.setItem("ros-watch-upgraded", target);
+        location.reload();
+        return;
+      }
+      const status = await fetch("/api/update/status", options).then(res => res.json()).catch(() => null);
+      if (status?.stage === "error") throw Error(status.error);
+      if (status?.stage === "restarting" || health === null || health.version === target) {
+        restartingAt ||= Date.now();
+        settingsMessage("update-result", "正在切换版本并等待服务恢复…");
+      }
+      if (restartingAt && Date.now() - restartingAt > 40000) break;
+    }
+    throw Error("未确认新版启动，请重新检查当前运行版本。");
+  } catch (error) {
+    settingsMessage("update-result", error.message, true);
+  } finally {
+    updateRunning = false;
+    $("update-check").disabled = $("update-apply").disabled = false;
+  }
+});

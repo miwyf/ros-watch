@@ -34,6 +34,18 @@ def tagged_roots(versions, tags):
             if tags.intersection(version.get("metadata", {}).get("container", {}).get("tags", []))}
 
 
+def dev_retirement_target(versions, expected, stable_graph):
+    targets = [version for version in versions if "dev" in version.get("metadata", {}).get("container", {}).get("tags", [])]
+    if not targets:
+        return None
+    if len(targets) != 1:
+        raise RuntimeError("Expected one package version tagged dev")
+    target = targets[0]
+    if target["name"] != expected or target["name"] in stable_graph or target["metadata"]["container"]["tags"] != ["dev"]:
+        raise RuntimeError("dev digest or tags changed, or its version belongs to the stable image")
+    return target
+
+
 def request_json(url, headers, method="GET"):
     request = urllib.request.Request(url, headers=headers, method=method)
     try:
@@ -47,10 +59,13 @@ def request_json(url, headers, method="GET"):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expected-digest", required=True)
+    parser.add_argument("--retire-dev-digest")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", args.expected_digest):
         parser.error("Expected a sha256 image index digest")
+    if args.retire_dev_digest is not None and not re.fullmatch(r"sha256:[0-9a-f]{64}", args.retire_dev_digest):
+        parser.error("Expected a sha256 digest for the legacy dev image")
     if os.environ.get("GITHUB_REPOSITORY", "").lower() != "miwyf/ros-watch":
         parser.error("This maintenance operation is restricted to miwyf/ros-watch")
     token = os.environ["GITHUB_TOKEN"]
@@ -101,6 +116,26 @@ def main():
             page += 1
 
     versions = list_versions()
+    if args.retire_dev_digest is not None:
+        target = dev_retirement_target(versions, args.retire_dev_digest, keep)
+        if target is None:
+            print("No active package version tagged dev")
+            return
+        version_id = int(target["id"])
+        print(json.dumps({"apply": args.apply, "dev_digest": target["name"], "delete_id": version_id}), flush=True)
+        if args.apply:
+            require_current()
+            if dev_retirement_target(list_versions(), args.retire_dev_digest, keep) != target:
+                raise RuntimeError("dev changed before deletion")
+            request_json(f"{package}/{version_id}", headers, method="DELETE")
+            require_current()
+            if tagged_roots(list_versions(), {"dev"}):
+                raise RuntimeError("dev is still present after deletion")
+            for digest in keep:
+                fetch(digest)
+            print(f"Deleted only dev package version {version_id}", flush=True)
+        return
+
     protected_dev = tagged_roots(versions, {"dev"})
     for digest in protected_dev:
         keep.update(manifest_graph(fetch, digest))
